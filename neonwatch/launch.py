@@ -22,12 +22,16 @@ LAN dashboard also needs. Its work is in the service module, imported only when 
 `--config` defaults to `~/.config/neonwatch/config.toml` when that file exists, else the built-in
 defaults.
 
-**The agent** is only ever started by the operator through sudo, and only through
-`scripts/neonwatch-agent`, which execs the repository venv's python with `-I -B`: isolated mode
+**The agent** is started one of two ways. By hand, the operator runs it through sudo, and only
+through `scripts/neonwatch-agent`. As a system service, `neonwatch-agent@<operator>.service` runs
+it from the root-owned install in /opt with `--operator <operator> --require-confined`
+(`scripts/services.py` installs both). Either way the interpreter is run with `-I -B`: isolated mode
 (no user site, no PYTHON* variables, no current directory on the path) and no bytecode writes.
 `uv run` is never used as root, because it would sync the venv and write caches as root. So
 `neonwatch agent` stops writing bytecode first thing, refuses unless the interpreter is isolated,
-refuses unless it is root, and refuses unless SUDO_UID and SUDO_USER name one real user. It then
+refuses unless it is root, and refuses unless SUDO_UID and SUDO_USER, or `--operator`, name one
+real user who is not root (both given, they must agree). With `--require-confined` it runs the
+write canary before it connects, and refuses to start if anything is writable. It then
 reads that user's config (`~` meaning their home, never /root) and their broker state dir for
 the AGENT credential, which it finds with `config.creds_file`: computed, never created, because
 the agent writes nothing to the host. Both are read as owned by that user (or root): `config.load`
@@ -98,9 +102,16 @@ class Invoker:
 
 
 def invoking_user(environ: Mapping[str, str],
-                  getpwnam: Callable[[str], Any] = pwd.getpwnam) -> Invoker:
-    """Who ran sudo, from SUDO_UID and SUDO_USER, checked against the password database."""
+                  getpwnam: Callable[[str], Any] = pwd.getpwnam,
+                  operator: str | None = None) -> Invoker:
+    """Who the agent observes for: the `operator` a system unit names, or who ran sudo, from
+    SUDO_UID and SUDO_USER, each checked against the password database."""
     raw, name = environ.get("SUDO_UID", ""), environ.get("SUDO_USER", "")
+    if operator is not None:
+        if name and name != operator:
+            raise WrongUser(f"--operator {operator!r} but sudo was run by {name!r}: inconsistent, "
+                            f"refusing to guess")
+        return _operator(operator, getpwnam)
     if not raw or not name:
         raise WrongUser(f"SUDO_UID and SUDO_USER are not both set; the agent is started only by "
                         f"the operator, with {WRAPPER}")
@@ -116,11 +127,26 @@ def invoking_user(environ: Mapping[str, str],
     if entry.pw_uid != uid:
         raise WrongUser(f"SUDO_USER={name!r} has uid {entry.pw_uid}, but SUDO_UID={uid}: "
                         f"inconsistent, refusing to guess")
+    return _invoker(entry, name)
+
+
+def _operator(name: str, getpwnam: Callable[[str], Any]) -> Invoker:
+    try:
+        entry = getpwnam(name)
+    except KeyError:
+        raise WrongUser(f"--operator {name!r}: no such user") from None
+    if entry.pw_uid == 0:
+        raise WrongUser(f"--operator {name!r} is root; the operator is the person the agent "
+                        f"observes for, and whose config and broker it uses")
+    return _invoker(entry, name)
+
+
+def _invoker(entry: Any, name: str) -> Invoker:
     home = Path(entry.pw_dir)
     if not home.is_absolute() or home == Path("/"):
         raise WrongUser(f"user {name!r} has home {entry.pw_dir!r}, which cannot hold "
                         f"their neonwatch state")
-    return Invoker(uid, name, home)
+    return Invoker(entry.pw_uid, name, home)
 
 
 def resolve_home(path: str, home: Path) -> Path:
@@ -150,6 +176,13 @@ def _parser() -> argparse.ArgumentParser:
         command = commands.add_parser(name, help=what)
         command.add_argument("--config", metavar="PATH",
                              help=f"the config file (default: ~/{CONFIG} if it exists)")
+        if name == "agent":
+            command.add_argument("--operator", metavar="USER",
+                                 help="observe for this user, as a system service does; "
+                                      "without it, the user who ran sudo")
+            command.add_argument("--require-confined", action="store_true",
+                                 help="refuse to start if the write canary finds anything "
+                                      "writable (the system service's sandbox)")
     commands.add_parser(
         "hash-password", help="print a password_hash line for the [web] table (as yourself)",
         description="Reads the dashboard password twice, without echo, and prints one line, "
@@ -194,7 +227,8 @@ def main(argv: list[str] | None = None, *, uid: int | None = None,
     try:
         if args.command == "agent":
             return _agent(args.config, uid, environ, sys.flags if flags is None else flags,
-                          getpwnam or pwd.getpwnam)
+                          getpwnam or pwd.getpwnam, operator=args.operator,
+                          require_confined=args.require_confined)
         role = Role(args.command)
         require_uid(role, uid)
         if role is Role.HASH_PASSWORD:
@@ -264,13 +298,14 @@ def _broker(path: Path | None, uid: int) -> int:
 
 
 def _agent(config_arg: str | None, uid: int, environ: Mapping[str, str], flags: Any,
-           getpwnam: Callable[[str], Any]) -> int:
+           getpwnam: Callable[[str], Any], *, operator: str | None = None,
+           require_confined: bool = False) -> int:
     sys.dont_write_bytecode = True
     if not flags.isolated:
         raise WrongUser(f"refusing to run outside Python's isolated mode (-I); start the agent "
                         f"with {WRAPPER}, which runs the venv's python -I -B")
     require_uid(Role.AGENT, uid)
-    invoker = invoking_user(environ, getpwnam)
+    invoker = invoking_user(environ, getpwnam, operator)
     path = (resolve_home(config_arg, invoker.home) if config_arg is not None
             else _default_config(invoker.home))
     config = load(path, owner=invoker.uid)   # no symlink, regular, small, the operator's
@@ -279,7 +314,7 @@ def _agent(config_arg: str | None, uid: int, environ: Mapping[str, str], flags: 
         config, broker=dataclasses.replace(config.broker, state_dir=str(state)))
     creds = creds_file(state, "agent")   # the broker's AGENT role; found, never created
     _log_to_stderr()
-    return _run_agent(config, creds, invoker)
+    return _run_agent(config, creds, invoker, require_confined)
 
 
 def _log_to_stderr() -> None:
@@ -287,11 +322,19 @@ def _log_to_stderr() -> None:
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
-def _run_agent(config: Config, creds: Path, invoker: Invoker) -> int:
-    """Connect as the AGENT role and run the collector until SIGINT or SIGTERM."""
+def _run_agent(config: Config, creds: Path, invoker: Invoker,
+               require_confined: bool = False) -> int:
+    """Connect as the AGENT role and run the collector until SIGINT or SIGTERM. With
+    `require_confined`, first refuse to run at all if the write canary finds a writable path."""
     import asyncio  # loads subprocess (asyncio.subprocess); not needed before this point
 
     from neonwatch import bus, collector, executor, probes
+
+    if require_confined and (writable := collector.write_canary(collector.CANARY_PATHS)):
+        print(f"neonwatch agent: --require-confined, but these are writable: "
+              f"{', '.join(writable)}; the service's sandbox is not in force, so the agent "
+              f"refuses to run", file=sys.stderr)
+        return 1
 
     async def observe() -> int:
         stop = asyncio.Event()

@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.local.md
 .tools/
+dist/
 .coverage
 .pytest_cache/
 .ruff_cache/

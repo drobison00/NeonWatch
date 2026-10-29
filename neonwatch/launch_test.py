@@ -88,6 +88,25 @@ def test_missing_or_inconsistent_sudo_variables_are_refused(environ, why):
 def test_a_home_that_cannot_hold_the_state_dir_is_refused(home):
     with pytest.raises(WrongUser, match="home"):
         invoking_user(SUDO, passwd(home=home))
+    with pytest.raises(WrongUser, match="home"):
+        invoking_user({}, passwd(home=home), operator="alice")
+
+
+def test_a_named_operator_stands_in_for_sudo_as_a_system_unit_starts_it():
+    assert invoking_user({}, passwd(), operator="alice") == Invoker(1000, "alice",
+                                                                    Path("/home/alice"))
+    assert invoking_user(SUDO, passwd(), operator="alice").name == "alice"   # agreeing is fine
+
+
+@pytest.mark.parametrize("environ, getpwnam, why", [
+    ({}, passwd(name="mallory"), "no such user"),
+    ({}, passwd(uid=0), "root"),
+    ({"SUDO_UID": "1001", "SUDO_USER": "eve"}, passwd(), "inconsistent"),
+])
+def test_a_named_operator_who_is_unknown_root_or_not_who_ran_sudo_is_refused(environ, getpwnam,
+                                                                              why):
+    with pytest.raises(WrongUser, match=why):
+        invoking_user(environ, getpwnam, operator="alice")
 
 
 def test_resolve_home_expands_a_tilde_against_the_given_home_only():
@@ -108,8 +127,9 @@ def ran(monkeypatch):
     """Captures what the agent would run with, instead of connecting anywhere."""
     seen: dict = {}
 
-    def run_agent(config, creds, invoker):
-        seen.update(config=config, creds=creds, invoker=invoker)
+    def run_agent(config, creds, invoker, require_confined):
+        seen.update(config=config, creds=creds, invoker=invoker,
+                    require_confined=require_confined)
         return 0
     monkeypatch.setattr(launch, "_run_agent", run_agent)
     monkeypatch.setattr(sys, "dont_write_bytecode", sys.dont_write_bytecode)
@@ -144,8 +164,23 @@ def test_the_agent_refuses_to_start_without_sudo_variables(ran, capsys):
     assert "SUDO_UID" in capsys.readouterr().err and ran == {}
 
 
+def test_the_agent_runs_for_a_named_operator_without_sudo_and_passes_on_confinement(ran,
+                                                                                   tmp_path):
+    assert agent(["--operator", "alice", "--require-confined"], environ={},
+                 home=str(tmp_path)) == 0
+    assert ran["invoker"].name == "alice" and ran["require_confined"] is True
+    assert ran["creds"] == tmp_path / ".local/state/neonwatch/broker/agent.creds.json"
+
+
+def test_the_operator_and_confinement_flags_belong_to_the_agent_alone(capsys):
+    for command in ("broker", "service"):
+        assert launch.main([command, "--operator", "alice"], uid=1000, environ={}) == 2
+        assert "--operator" in capsys.readouterr().err
+
+
 def test_the_agent_reads_the_invoking_users_credentials_not_roots(ran, tmp_path):
     assert agent(home=str(tmp_path)) == 0
+    assert ran["require_confined"] is False
     assert ran["creds"] == tmp_path / ".local/state/neonwatch/broker/agent.creds.json"
     assert ran["invoker"].name == "alice"
     assert ran["config"] == Config(broker=ran["config"].broker)   # built-in defaults otherwise
@@ -217,6 +252,37 @@ def test_the_agent_runs_the_closed_catalog_through_the_executor_and_publishes(mo
     assert made["url"] == config.broker.url and made["creds"] == Path("/x/agent.creds.json")
     assert made["owner"] == 1000   # the creds file must be the operator's (or root's)
     assert made["stopped"] and made["bus"].closed
+
+
+def test_a_confined_agent_refuses_to_run_when_anything_is_writable(monkeypatch, capsys):
+    from neonwatch import bus, collector
+
+    async def connect(url, creds, *, owner):
+        raise AssertionError("connected before checking its confinement")
+    checked = []
+
+    def canary(paths):
+        checked.append(paths)
+        return ["/var", "/home"]
+    monkeypatch.setattr(bus, "connect", connect)
+    monkeypatch.setattr(collector, "write_canary", canary)
+    invoker = Invoker(1000, "alice", Path("/home/alice"))
+    assert launch._run_agent(Config(), Path("/x/agent.creds.json"), invoker, True) == 1
+    assert checked == [collector.CANARY_PATHS]
+    err = capsys.readouterr().err
+    assert "/var, /home" in err and "--require-confined" in err
+
+
+def test_a_confined_agent_with_nothing_writable_goes_on_to_connect(monkeypatch, capsys):
+    from neonwatch import bus, collector
+
+    async def refuse(url, creds, *, owner):
+        raise BusError("could not connect")
+    monkeypatch.setattr(bus, "connect", refuse)
+    monkeypatch.setattr(collector, "write_canary", lambda paths: [])
+    invoker = Invoker(1000, "alice", Path("/home/alice"))
+    assert launch._run_agent(Config(), Path("/x/agent.creds.json"), invoker, True) == 1
+    assert "could not connect" in capsys.readouterr().err
 
 
 def test_the_agent_reports_a_broker_it_cannot_reach(monkeypatch, capsys):

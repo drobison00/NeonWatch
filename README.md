@@ -56,15 +56,21 @@ what enforces each part:
   entry exactly, with no shell and an empty environment, and only from a root-owned binary. It
   opens files `O_RDONLY | O_NOFOLLOW`, and it talks to Docker with `GET` only.
 
-What this does **not** give you, today:
+Two more hold only when the agent runs as a system service (see *Run as services*):
 
-- **Kernel enforcement.** Started by hand, the agent is an ordinary root process, and the
-  dashboard says so: *unconfined (manual mode)*. A systemd unit with a read-only filesystem is
-  planned, not built.
-- **Protection from your own account.** `sudo scripts/neonwatch-agent` runs the clone's `.venv`
-  Python, its libraries and the NeonWatch source. All of them belong to your user, and so may the
-  interpreter itself if uv downloaded it. Anything that can write as you can change what runs as
-  root the next time you start the agent. Run the checks below before you do.
+- **Kernel enforcement.** The unit gives the agent a read-only filesystem, loopback-only
+  networking and a fixed capability set, and the agent refuses to start if its write canary finds
+  anything writable. Started by hand, it is an ordinary root process, and the dashboard says so:
+  *unconfined (manual mode)*.
+- **Root runs nothing your account can change.** The unit runs a root-owned copy in
+  `/opt/neonwatch`, on the system Python. By hand, `sudo scripts/neonwatch-agent` runs the clone's
+  `.venv` Python, its libraries and the NeonWatch source, all of which belong to your user (and so
+  may the interpreter, if uv downloaded it): anything that can write as you can change what runs
+  as root the next time you start it. Installing the service trusts your account once, at that
+  moment. Run the checks below before either.
+
+What this does **not** give you:
+
 - **Coverage of other code.** The gates scan NeonWatch's code, not the NATS client library or the
   Python standard library. The external commands are trusted to do what their reviewed flags
   say. Two that changed the host when run as root (`nvidia-smi` and `apt-get`) run as `nobody`.
@@ -173,8 +179,8 @@ After the first visit the token lives in a cookie. To look from another machine,
 
 > [!IMPORTANT]
 > On a fresh start, these are **expected**, not faults:
-> - **Filesystem: unconfined (manual mode)**, and an INFO issue saying the same: the agent is
->   not kernel-confined when started by hand (see above).
+> - **Filesystem: unconfined (manual mode)**, and an INFO issue saying the same, when you
+>   started the agent by hand: it is not kernel-confined then (see above).
 > - **Judge: not asked yet**, then **unreachable** after the first collation: no judge is
 >   configured. Everything else works without one.
 > - **Analyst LLM: not configured**, and the *Analyse* buttons greyed out.
@@ -193,7 +199,42 @@ claude mcp remove --scope user neonwatch   # only if you registered the MCP serv
 rm -rf /path/to/the/clone
 ```
 
-Root wrote nothing, so nothing needs cleaning under `/etc`, `/var` or `/root`.
+Root wrote nothing, so nothing needs cleaning under `/etc`, `/var` or `/root`. If you installed
+the services, remove them first (below).
+
+### Run as services
+
+Instead of three terminals: the agent as a hardened system unit, `neonwatch-agent@<you>`, and the
+broker and service as `systemctl --user` units. `tools/services.py` installs all three and uses
+only the standard library, so root runs nothing but that file and the system Python.
+
+```sh
+uv run python tools/services.py bundle             # as you: the two wheels, into dist/agent
+sudo /usr/bin/python3 -I tools/services.py install-agent --operator "$USER"
+python3 tools/services.py install-user             # as you, from the clone the units will run
+sudo loginctl enable-linger "$USER"                # keep them running when you are logged out
+```
+
+Each install enables its units but starts nothing that is not already running, so a hand-started
+copy is never doubled. Stop those, then `systemctl --user start neonwatch-service` (it starts the
+broker too) and `sudo systemctl start neonwatch-agent@$USER`. The service's URL is in its journal:
+`journalctl --user -u neonwatch-service | grep -o 'http://127.0.0.1:8765/[^ ]*' | tail -1`.
+
+`install-agent` copies the bundle somewhere only root can write and checks every hash before it
+builds anything. It builds a venv in `/opt/neonwatch.new` and imports the agent from it, and
+refuses unless every file is root's and writable by nobody else. Only then does it swap the new
+copy into `/opt/neonwatch`, keeping the previous one as `/opt/neonwatch.old`. Re-run `bundle` and
+`install-agent` to upgrade the agent; a running unit is restarted onto the new copy.
+
+The agent's interpreter is the system's `/usr/bin/python3`, which must be root's and 3.12 or
+3.13 (what `pyproject.toml` requires); `install-agent` refuses one that is not root's.
+
+To remove them:
+
+```sh
+sudo /usr/bin/python3 -I tools/services.py uninstall-agent    # the unit and /opt/neonwatch
+python3 tools/services.py uninstall-user
+```
 
 ## Configure
 
@@ -371,10 +412,14 @@ Find what you were doing, then the start of the message you saw.
 
 ## Known limitations
 
-- **Manual launch only:** no systemd units, no kernel confinement, no CPU quota. The agent
-  accounts its own CPU against a 1% budget and defers its heavier probes as it nears it.
-- **Root runs user-owned code** (see *Before you run it as root*). A root-owned install is
-  planned along with systemd.
+- **The agent unit's capability set is a first cut.** Each capability is there for a named
+  probe, but which probes lose data under the sandbox depends on the host; check the unit's
+  journal on its first run. The agent accounts its own CPU against a 1% budget and defers its
+  heavier probes as it nears it; the unit adds a 50% CPU ceiling for a runaway, not the budget.
+- **Started by hand, root runs user-owned code** (see *Before you run it as root*). The system
+  service does not.
+- **The broker and service user units are not sandboxed** beyond `NoNewPrivileges`; they run as
+  you, from the clone.
 - **A single-user machine is assumed.** The broker and the judge are plain TCP on loopback, and
   nothing authenticates the server to the client. Another local account that binds 4222 or 8200
   first would receive the agent's redacted observations or the judge's questions.

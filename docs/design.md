@@ -31,13 +31,16 @@ for, and the one non-deterministic thing in the system, the judge, sits outside 
    files open `O_RDONLY`, commands exec from the catalog's argv only, HTTP methods other than `GET`
    raise. `subprocess`, raw sockets and file-writing calls are importable only there, and a static
    gate forbids write calls even there.
-4. **Launch is manual for now** (decided 2026-09-30): `neonwatch broker` and `neonwatch service` as
-   you, `sudo scripts/neonwatch-agent` as root, each refusing the wrong user. systemd comes later.
-   **Planned, not built: a kernel-enforced seatbelt, when it moves to systemd:** run as a unit, the agent keeps
-   uid 0 but sees the filesystem read-only (`ProtectSystem=strict`, `ProtectHome=read-only`,
-   `PrivateTmp`, `NoNewPrivileges`), with one writable path: its socket directory. The agent keeps
-   the capabilities its reads need, so this is a seatbelt against a bug, not a wall against a
-   hostile agent. The wall is (1)-(3).
+4. **Launch is by hand or as units** (by hand decided 2026-09-30; units built 2026-10-29). By
+   hand: `neonwatch broker` and `neonwatch service` as you, `sudo scripts/neonwatch-agent` as
+   root, each refusing the wrong user. As units (`tools/services.py`): the broker and service as
+   `systemctl --user` units, and the agent as `neonwatch-agent@<operator>.service`, running a
+   root-owned copy in `/opt/neonwatch` with `--operator <operator> --require-confined`.
+   **The kernel-enforced seatbelt:** the unit keeps uid 0 but sees the filesystem read-only
+   (`ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateTmp`, `NoNewPrivileges`), reaches only
+   loopback (`IPAddressDeny=any`, `IPAddressAllow=localhost`), and holds only the capabilities its
+   probes need, each named in the unit for the probe that needs it. That is a seatbelt against a
+   bug, not a wall against a hostile agent. The wall is (1)-(3).
 5. **The agent measures whether it can write, without writing.** At start and with every heartbeat
    it checks `/`, `/etc`, `/home`, `/var`, `/usr` and `/boot` with `statvfs` (read-only mount) and
    `access(W_OK)`; nothing is created, so the check itself cannot mutate the host. Under the unit, any success refuses the start and names the
@@ -331,8 +334,9 @@ the crash-looping container, the veth churn rate, and the last heartbeat before 
 
 The target is under 1–2% of one day's CPU, amortized. It's enforced twice:
 
-- **A hard ceiling (planned, with systemd):** the monitor's units run in one systemd slice with
-  `CPUQuota=` set from the budget, so they cannot exceed it even when a probe misbehaves.
+- **A hard ceiling (the agent's unit only):** `CPUQuota=50%`, `MemoryMax=512M`, `TasksMax=64`,
+  `Nice=10` and idle I/O priority. That stops a runaway; it is not the budget, which is a day's
+  amortized spend. One slice for all three units, with a quota set from the budget, is planned.
 - **Self-accounting:** every probe run records its CPU time. The collector keeps a rolling 24-hour
   spend and defers low-priority probes when it nears the budget. The spend is published in
   heartbeats and shown on the dashboard, so the claim is visible rather than asserted.
@@ -386,15 +390,18 @@ seen red once before it counts:
 - **Read-only, statically:** an AST scan of `collector`, `executor`, `probes` and `launcher` refuses
   write-mode `open`, `os.remove`, `unlink`, `rename`, `chmod`, `shell=True`, any HTTP method but `GET`,
   and any catalog argv whose verb is not on the read-only list (`list`, `show`, `-a`, `status`...).
-- **Read-only, at runtime (planned):** an integration test launches the agent's unit in test mode and
+- **Read-only, at runtime (half built):** `--require-confined` is tested to refuse a start when
+  the canary finds a writable path, and to check before it connects. Still planned: an
+  integration test launches the agent's unit in test mode and
   asserts the write canary reports nothing writable, then drops one hardening property and asserts
   the canary refuses to start. That second half is what proves the canary can fail. A second test
   hands `executor` a spec that is not in the catalog, a `POST`, and a write-mode path, and asserts
   all three are refused.
 - **Budget (planned):** a benchmark runs the full catalog and asserts the amortized daily CPU is
   under budget; the number is ratcheted.
-- **Hardening as data (planned):** `launcher.unit_properties()` is tested to contain every hardening property
-  listed above, for every role.
+- **Hardening as data (the agent's unit):** `tools/services_test.py` holds the unit to its
+  `ExecStart` and the hardening properties above, has `systemd-analyze verify` accept it, and
+  fails if `systemd-analyze security --offline` rates its exposure worse than 4.0.
 
 ## Decided
 
