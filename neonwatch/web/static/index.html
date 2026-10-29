@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeonWatch</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header id="topbar" class="topbar">
+  <div class="brand" data-text="NeonWatch">NeonWatch</div>
+  <nav class="views" aria-label="Views">
+    <button type="button" class="view-tab" data-view="layout" aria-pressed="true">Attention</button>
+    <button type="button" class="view-tab" data-view="sched" aria-pressed="false">Scheduled</button>
+    <button type="button" class="view-tab" data-view="svc" aria-pressed="false">Services<span id="svc-badge" class="tab-badge" hidden></span></button>
+    <button type="button" class="view-tab" data-view="logs" aria-pressed="false">Logs</button>
+    <button type="button" class="view-tab" data-view="board" aria-pressed="false">Board</button>
+  </nav>
+  <dl class="vitals" id="vitals">
+    <div class="vital" id="v-agent"><dt>Agent</dt><dd>…</dd></div>
+    <div class="vital" id="v-confined"><dt>Filesystem</dt><dd>…</dd></div>
+    <div class="vital" id="v-budget"><dt>Agent CPU</dt><dd>…</dd></div>
+    <div class="vital" id="v-live"><dt>Live stream</dt><dd>…</dd></div>
+    <div class="vital" id="v-judge"><dt>Judge</dt><dd>…</dd></div>
+    <div class="vital" id="v-store"><dt>Store</dt><dd>…</dd></div>
+    <div class="vital" id="v-analyst"><dt>Analyst LLM</dt><dd>…</dd></div>
+  </dl>
+  <button type="button" id="theme" class="theme-toggle" aria-label="Colour theme: auto">◐ Auto</button>
+  <button type="button" id="logout" class="logout" hidden>Log out</button>
+  <div id="hw" class="hwstrip" role="group" aria-label="CPU, disks and GPUs now"></div>
+</header>
+<div id="banner" class="banner" role="alert" hidden></div>
+<div id="statusline" class="statusline" role="status" aria-live="polite">
+  <span id="status-text">Loading…</span>
+  <button type="button" id="status-clear" class="linkish" hidden>clear</button>
+</div>
+
+<div id="auth" class="auth" hidden>
+  <h1>Not signed in</h1>
+  <p>This dashboard needs the per-launch token. Open the URL printed by
+    <code>neonwatch service</code> (it looks like <code>http://127.0.0.1:8765/?token=…</code>) in this browser.
+    The token is set as a cookie and removed from the address bar.</p>
+</div>
+
+<main id="layout" class="layout">
+  <section id="attention" class="attention" aria-labelledby="h-attention">
+    <div class="section-head">
+      <h2 id="h-attention">Needs attention</h2>
+      <p id="counts" class="counts"></p>
+    </div>
+    <div id="toolbar" class="toolbar">
+      <span id="sel-count" class="muted">Select issues or incidents to analyse them together.</span>
+      <button type="button" id="sel-analyse" disabled>Analyse selected…</button>
+      <button type="button" id="sel-clear" disabled>Clear selection</button>
+      <span class="toolbar-gap"></span>
+      <label for="win-select">Analyse a window:</label>
+      <select id="win-select">
+        <option value="900">last 15 min</option>
+        <option value="3600" selected>last 1 h</option>
+        <option value="21600">last 6 h</option>
+        <option value="86400">last 24 h</option>
+      </select>
+      <button type="button" id="win-analyse">Analyse window…</button>
+    </div>
+    <div id="incidents" class="stack" aria-label="Incidents"></div>
+    <div id="issues" class="stack" aria-label="Open issues"></div>
+    <details id="held" class="held">
+      <summary id="held-summary">Acknowledged and snoozed</summary>
+      <div id="held-list" class="stack"></div>
+    </details>
+    <section id="analyses" class="analyses" aria-labelledby="h-analyses" hidden>
+      <h2 id="h-analyses">Analyses requested here</h2>
+      <div id="analyses-list" class="stack"></div>
+    </section>
+  </section>
+
+  <aside id="machine" class="machine" aria-label="Where the machine stands">
+    <section aria-labelledby="h-trends">
+      <h2 id="h-trends">Last hour</h2>
+      <div id="trends" class="trends"></div>
+    </section>
+    <section aria-labelledby="h-matrix" data-fold="panel:matrix">
+      <div class="panel-head"><button type="button" class="fold" aria-expanded="true" aria-label="Collapse" title="Collapse">▾</button><h2 id="h-matrix">Domains</h2></div>
+      <p class="legend" id="matrix-legend"></p>
+      <div id="matrix" class="matrix"></div>
+    </section>
+    <section aria-labelledby="h-probes" data-fold="panel:probes">
+      <div class="panel-head"><button type="button" class="fold" aria-expanded="true" aria-label="Collapse" title="Collapse">▾</button><h2 id="h-probes">Probe freshness</h2></div>
+      <table class="probes">
+        <thead><tr><th scope="col">Probe</th><th scope="col">Age</th><th scope="col">State</th></tr></thead>
+        <tbody id="probes"></tbody>
+      </table>
+    </section>
+  </aside>
+</main>
+
+<section id="sched" class="listview" aria-labelledby="h-sched" hidden>
+  <div class="section-head">
+    <h2 id="h-sched">Scheduled jobs</h2>
+    <p id="sched-asof" class="counts muted"></p>
+  </div>
+  <div class="toolbar">
+    <label for="sched-source">Source</label>
+    <select id="sched-source"><option value="">all</option></select>
+    <label for="sched-user">User</label>
+    <select id="sched-user"><option value="">all</option></select>
+    <label title="Listed but deliberately not read: a symlink or not a regular file"><input type="checkbox" id="sched-unread"> not read</label>
+    <label><input type="checkbox" id="sched-ignored"> run-parts ignores</label>
+    <label for="sched-text">Text</label>
+    <input id="sched-text" type="search" placeholder="command, file, schedule…">
+    <span class="toolbar-gap"></span>
+    <span id="sched-count" class="muted"></span>
+  </div>
+  <div class="split">
+    <table class="grid">
+      <thead id="sched-head"></thead>
+      <tbody id="sched-rows"></tbody>
+    </table>
+    <aside id="sched-detail" class="panel" aria-label="Job detail" hidden></aside>
+  </div>
+</section>
+
+<section id="svc" class="listview" aria-labelledby="h-svc" hidden>
+  <div class="section-head">
+    <h2 id="h-svc">Services</h2>
+    <p id="svc-asof" class="counts muted"></p>
+  </div>
+  <div class="toolbar">
+    <label><input type="checkbox" id="svc-failed"> failed</label>
+    <label><input type="checkbox" id="svc-restarting"> restarting</label>
+    <label><input type="checkbox" id="svc-root"> runs as root</label>
+    <label title="No description from the LLM for this definition yet"><input type="checkbox" id="svc-undescribed"> not described</label>
+    <label for="svc-text">Text</label>
+    <input id="svc-text" type="search" placeholder="name, exec, description…">
+    <span class="toolbar-gap"></span>
+    <span id="svc-count" class="muted"></span>
+    <button type="button" id="svc-describe" disabled>Describe services…</button>
+  </div>
+  <div id="svc-progress" class="job-progress" aria-live="polite" hidden></div>
+  <div id="svc-alert" class="svc-alert" role="status" hidden></div>
+  <p class="fact-note">Hover a service for what it is; click it for the full description beside what the monitor measured. Descriptions come from the backend LLM's cache here: nothing is sent until you confirm an estimate, and each service is described once per definition.</p>
+  <table class="grid">
+    <thead id="svc-head"></thead>
+    <tbody id="svc-rows"></tbody>
+  </table>
+  <div id="svc-tip" class="svc-tip" role="tooltip" hidden></div>
+</section>
+
+<section id="logs" class="listview" aria-labelledby="h-logs" hidden>
+  <div class="section-head">
+    <h2 id="h-logs">System journal</h2>
+    <p id="logs-asof" class="counts muted"></p>
+  </div>
+  <div class="toolbar">
+    <button type="button" id="logs-load">Load last 200 lines</button>
+    <label for="logs-priority">Priority</label>
+    <select id="logs-priority">
+      <option value="7">all</option>
+      <option value="4">warning and up</option>
+      <option value="3">error and up</option>
+    </select>
+    <span class="toolbar-gap"></span>
+    <span id="logs-count" class="muted"></span>
+    <button type="button" id="logs-explain" disabled>Explain new…</button>
+  </div>
+  <div id="logs-progress" class="job-progress" aria-live="polite" hidden></div>
+  <p class="fact-note">Loading reads this machine's journal and shows only explanations already cached here. Nothing is sent anywhere until you confirm an estimate; each kind of line is explained once.</p>
+  <table class="grid logs">
+    <thead><tr><th scope="col">Time</th><th scope="col">Priority</th><th scope="col">Unit</th><th scope="col">Message</th><th scope="col">Explanation</th></tr></thead>
+    <tbody id="logs-rows"><tr><td colspan="5" class="muted">Not loaded. Nothing is read until you ask.</td></tr></tbody>
+  </table>
+</section>
+
+<section id="board" class="listview boardview" aria-labelledby="h-board" hidden>
+  <div class="section-head">
+    <h2 id="h-board">Board</h2>
+    <p id="board-asof" class="counts muted"></p>
+  </div>
+  <div class="board-split">
+    <figure class="board-figure">
+      <div id="board-svg"></div>
+      <figcaption id="board-caption" class="fact-note"></figcaption>
+    </figure>
+    <aside class="board-side">
+      <div id="board-legend" class="board-legend" aria-label="Colour scale"></div>
+      <section id="board-detail" class="panel board-detail" aria-live="polite"></section>
+    </aside>
+  </div>
+</section>
+
+<dialog id="lx-dialog" class="an-dialog" aria-labelledby="lx-title">
+  <div class="an-body">
+    <h2 id="lx-title">Explain log lines with the backend LLM</h2>
+    <p class="muted">Nothing is sent until you confirm. Each kind of line is sent once, redacted, as a template with its numbers, addresses and ids masked. Log text is treated as data, never as instructions, and the explanations are shown as plain text.</p>
+    <div class="row">
+      <span id="lx-estimate-state" class="muted"></span>
+    </div>
+    <div id="lx-estimate-out"></div>
+    <div class="row">
+      <button type="button" id="lx-confirm" class="primary" disabled>Send</button>
+      <button type="button" id="lx-close">Close</button>
+    </div>
+    <div id="lx-result"></div>
+  </div>
+</dialog>
+
+<dialog id="svc-dialog" class="an-dialog svc-dialog" aria-labelledby="svc-title">
+  <div class="svc-card-head">
+    <h2 id="svc-title" class="mono"></h2>
+    <button type="button" id="svc-close" aria-label="Close the service card">Close</button>
+  </div>
+  <p id="svc-brief" class="svc-brief"></p>
+  <div class="svc-cols">
+    <section class="svc-desc" aria-labelledby="svc-desc-h">
+      <h3 id="svc-desc-h">What it is</h3>
+      <div id="svc-desc"></div>
+    </section>
+    <section class="svc-facts" aria-labelledby="svc-facts-h">
+      <h3 id="svc-facts-h">What the monitor measured</h3>
+      <div id="svc-facts"></div>
+    </section>
+  </div>
+  <div id="svc-more"></div>
+</dialog>
+
+<dialog id="log-dialog" class="an-dialog svc-dialog" aria-labelledby="log-title">
+  <div class="svc-card-head">
+    <h2 id="log-title" class="mono"></h2>
+    <button type="button" id="log-close" aria-label="Close the log line">Close</button>
+  </div>
+  <p id="log-brief" class="svc-brief"></p>
+  <div class="svc-cols">
+    <section class="svc-desc" aria-labelledby="log-meaning-h">
+      <h3 id="log-meaning-h">What it means</h3>
+      <div id="log-meaning"></div>
+    </section>
+    <section class="svc-facts" aria-labelledby="log-facts-h">
+      <h3 id="log-facts-h">The line</h3>
+      <div id="log-facts"></div>
+    </section>
+  </div>
+</dialog>
+
+<dialog id="sd-dialog" class="an-dialog" aria-labelledby="sd-title">
+  <div class="an-body">
+    <h2 id="sd-title">Describe services with the backend LLM</h2>
+    <p class="muted">Nothing is sent until you confirm. Each service shown that is not yet described is sent once, redacted: its unit name, Description=, ExecStart, unit file, User= and state. Unit text is treated as data, never as instructions, and the descriptions are shown as plain text.</p>
+    <div class="row">
+      <span id="sd-estimate-state" class="muted"></span>
+    </div>
+    <div id="sd-estimate-out"></div>
+    <div class="row">
+      <button type="button" id="sd-confirm" class="primary" disabled>Send</button>
+      <button type="button" id="sd-close">Close</button>
+    </div>
+    <div id="sd-result"></div>
+  </div>
+</dialog>
+
+<dialog id="an-dialog" class="an-dialog" aria-labelledby="an-title">
+  <div class="an-body">
+    <h2 id="an-title">Analyse with the backend LLM</h2>
+    <p class="muted">Nothing is sent until you confirm. The answer is advisory text; suggested checks are shown for you to copy and are never run.</p>
+    <h3>Selection</h3>
+    <ul id="an-subjects" class="subjects"></ul>
+    <label for="an-question" class="block-label">Question (optional)</label>
+    <textarea id="an-question" rows="3" maxlength="2000" placeholder="e.g. Is the veth churn caused by the crash loop?"></textarea>
+    <div class="row">
+      <button type="button" id="an-estimate">Estimate</button>
+      <span id="an-estimate-state" class="muted"></span>
+    </div>
+    <div id="an-estimate-out"></div>
+    <div class="row">
+      <button type="button" id="an-confirm" class="primary" disabled>Send</button>
+      <button type="button" id="an-close">Close</button>
+    </div>
+    <div id="an-result"></div>
+  </div>
+</dialog>
+</body>
+</html>

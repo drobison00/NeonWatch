@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.local.md
+.tools/
+.coverage
+.pytest_cache/
+.ruff_cache/
+
+# Local working notes
+PLAN.md

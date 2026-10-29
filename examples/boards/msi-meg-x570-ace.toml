@@ -1,0 +1,194 @@
+# MSI MEG X570 ACE (ATX, 244 x 305 mm), top down, in mm. An example layout: positions are drawn
+# from the board's published layout, not measured. Use it with  [web] board = "<path to this file>".
+name = "MSI MEG X570 ACE"
+width = 244
+height = 305
+caption = "MSI MEG X570 ACE, schematic: positions approximate. Which part sits in which slot is read from the PCI topology."
+holes = [[6, 6], [6, 299], [238, 6], [238, 299], [130, 6], [130, 299], [238, 150]]
+traces = ["M98 92 V112", "M108 92 V112 H150", "M150 80 H158", "M194 228 V258 H232",
+          "M168 198 H128", "M168 208 H128", "M40 140 H34"]
+
+# A Ryzen package: the I/O die and two chiplets, each coloured by its own k10temp sensor.
+[socket]
+x = 74
+y = 44
+w = 44
+h = 44
+die = [{ sensor = "Tctl", x = 81, y = 70, w = 14, h = 12 },
+       { sensor = "Tccd1", x = 79, y = 50, w = 16, h = 12 },
+       { sensor = "Tccd2", x = 97, y = 50, w = 16, h = 12 }]
+
+[[part]]
+kind = "io"
+x = 0
+y = 8
+w = 34
+h = 150
+label = "rear I/O"
+
+[[part]]
+kind = "vrm"
+x = 38
+y = 30
+w = 20
+h = 76
+label = "VRM"
+no_sensor = "VRM temperatures need the nct6775 driver (this board's Super I/O is an NCT6797)."
+
+[[part]]
+kind = "vrm"
+x = 60
+y = 10
+w = 82
+h = 18
+label = "VRM"
+no_sensor = "VRM temperatures need the nct6775 driver (this board's Super I/O is an NCT6797)."
+
+[[part]]
+kind = "conn"
+x = 8
+y = 0
+w = 26
+h = 7
+label = "CPU power"
+
+[[part]]
+kind = "conn"
+x = 232
+y = 72
+w = 10
+h = 52
+label = "ATX 24-pin"
+
+[[part]]
+kind = "conn"
+x = 232
+y = 196
+w = 10
+h = 56
+label = "SATA"
+
+[[part]]
+kind = "audio"
+x = 4
+y = 256
+w = 40
+h = 44
+label = "audio"
+
+[[part]]
+kind = "chipset"
+x = 168
+y = 168
+w = 52
+h = 60
+label = "X570 chipset"
+no_sensor = "The X570 chipset reports no temperature to Linux."
+
+[[part]]
+kind = "dimm"
+x = 160
+y = 20
+w = 5
+h = 132
+label = "DIMM"
+label_at = [174, 17]
+no_sensor = "Memory reports no temperature without a sensor driver."
+
+[[part]]
+kind = "dimm"
+x = 169
+y = 20
+w = 5
+h = 132
+no_sensor = "Memory reports no temperature without a sensor driver."
+
+[[part]]
+kind = "dimm"
+x = 178
+y = 20
+w = 5
+h = 132
+no_sensor = "Memory reports no temperature without a sensor driver."
+
+[[part]]
+kind = "dimm"
+x = 187
+y = 20
+w = 5
+h = 132
+no_sensor = "Memory reports no temperature without a sensor driver."
+
+# M2_2 and M2_3 both hang off the chipset; pin one (pin = "0000:05:00.0") to say which.
+
+[[slot]]
+name = "M2_1"
+kind = "m2"
+attach = "cpu"
+x = 46
+y = 111
+w = 80
+h = 11
+
+[[slot]]
+name = "M2_2"
+kind = "m2"
+attach = "chipset"
+x = 46
+y = 158
+w = 80
+h = 11
+
+[[slot]]
+name = "M2_3"
+kind = "m2"
+attach = "chipset"
+x = 46
+y = 199
+w = 80
+h = 11
+
+[[slot]]
+name = "PCI_E1"
+kind = "pcie"
+lanes = 16
+x = 34
+y = 133
+w = 89
+h = 6
+
+[[slot]]
+name = "PCI_E2"
+kind = "pcie"
+lanes = 1
+x = 70
+y = 153.3
+w = 26
+h = 6
+
+[[slot]]
+name = "PCI_E3"
+kind = "pcie"
+lanes = 8
+x = 34
+y = 173.6
+w = 89
+h = 6
+
+[[slot]]
+name = "PCI_E4"
+kind = "pcie"
+lanes = 1
+x = 70
+y = 194
+w = 26
+h = 6
+
+[[slot]]
+name = "PCI_E5"
+kind = "pcie"
+lanes = 4
+x = 34
+y = 214.3
+w = 89
+h = 6

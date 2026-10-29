@@ -1,0 +1,29 @@
+# ~/.config/neonwatch/config.toml: the settings most often changed. Every key is optional: a
+# missing one takes its default, and an unknown one is an error. The file must be a regular file
+# (not a symlink) owned by you. The full reference is docs/configuration.md.
+
+[web]
+# host = "127.0.0.1"        # a LAN address also needs tls_cert, tls_key, password_hash, allowed_hosts
+# port = 8765
+# board = "atx"             # or a path to your own layout (docs/board-layouts.md)
+
+[judge]
+# name = "Qwen 7B judge (GPU 0)"                # how the dashboard names it; recorded on each answer
+# url = "http://127.0.0.1:8200/v1/systemone"   # docs/judge-protocol.md; loopback only
+# model = "judge"                               # sent in each request
+# concurrency = 2
+
+[notify]
+# min_severity = "critical"  # desktop notifications at or above this severity
+
+[retention]
+# Whichever limit is reached first.
+# max_age_s = "7d"
+# max_bytes = "10GiB"
+
+# [analyst]                  # optional; explains issues, logs and services on request
+# provider = "openai-compatible"   # or "anthropic"
+# base_url = "http://127.0.0.1:8000/v1"
+# model = "your-model"
+# reach = "local"            # "local" (loopback), "lan" (private addresses) or "remote"
+# api_key_env = ""           # the NAME of the environment variable holding a key, never the key

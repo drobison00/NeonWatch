@@ -1,0 +1,1180 @@
+{
+  "repository": "drobison00/NeonWatch",
+  "requirements": "A local, web-based system health monitor. A privileged observer (root, deterministic, read-only) sweeps health, hardware, logs, firewall, networking, processes, services and containers through staggered probes and emits observations to a broker. The dashboard reads and displays them; the judge classifies them through many parallel attestations per context, so relevant events percolate up, reach the dashboard, and notify the desktop when critical. Amortized under 1-2% system load per day.",
+  "constraints": "The agent runs as root, launched by hand for now, and every action it takes is deterministic and read-only. Only the unprivileged service asks the judge anything. Broker: NATS JetStream on loopback with per-role credentials. Retention configurable, default 7 days or 10 GiB. The judge, when configured, on loopback (default 127.0.0.1:8200), sized for a 16K-token context. Python 3.12, uv.",
+  "components": [
+    {
+      "name": "schema",
+      "responsibility": "The versioned wire types every process shares: Observation, Finding, Context, Attestation, Issue, Heartbeat, Event; strict encode/decode that refuses unknown fields and kinds.",
+      "files": [
+        "neonwatch/schema.py"
+      ],
+      "level": 1,
+      "public_interface": [
+        {
+          "name": "decode_event",
+          "signature": "decode_event(data: bytes) -> Event",
+          "returns": "Event (raises SchemaError)"
+        },
+        {
+          "name": "encode_event",
+          "signature": "encode_event(event: Event) -> bytes",
+          "returns": "bytes"
+        },
+        {
+          "name": "Event",
+          "signature": "Event(kind: Kind, at: float, source: str, subject: str, body: Mapping)",
+          "returns": "Event"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "redact",
+      "responsibility": "Removes secret-shaped text (tokens, keys, passwords, env values) from anything leaving the privileged agent.",
+      "files": [
+        "neonwatch/redact.py"
+      ],
+      "level": 1,
+      "public_interface": [
+        {
+          "name": "redact",
+          "signature": "redact(text: str) -> tuple[str, int]",
+          "returns": "tuple[str, int]"
+        },
+        {
+          "name": "redact_mapping",
+          "signature": "redact_mapping(data: Mapping) -> tuple[dict, int]",
+          "returns": "tuple[dict, int]"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "config",
+      "responsibility": "Loads and validates the one config file: paths, cadences, CPU budget, broker URL, the judge URL and concurrency, retention (max age and max bytes, whichever first; default 7 days / 10 GiB), notification threshold. Unknown keys refuse.",
+      "files": [
+        "neonwatch/config.py"
+      ],
+      "level": 1,
+      "public_interface": [
+        {
+          "name": "load",
+          "signature": "load(path: Path | None) -> Config",
+          "returns": "Config (raises ConfigError)"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "probes",
+      "responsibility": "The closed probe catalog: each probe's id, tier, fixed read-only argv, file reads or Docker GET path, cost class, and the parser from raw bytes to observation data. Pure data plus pure parsers; executes nothing.",
+      "files": [
+        "neonwatch/probes/__init__.py",
+        "neonwatch/probes/catalog.py",
+        "neonwatch/probes/parsers.py"
+      ],
+      "level": 2,
+      "public_interface": [
+        {
+          "name": "CATALOG",
+          "signature": "CATALOG: tuple[ProbeSpec, ...]",
+          "returns": "tuple[ProbeSpec, ...]"
+        },
+        {
+          "name": "ProbeSpec",
+          "signature": "ProbeSpec(id: str, tier: Tier, kind: Kind, argv: tuple[str, ...], path: str, cost: Cost)",
+          "returns": "ProbeSpec"
+        },
+        {
+          "name": "parse",
+          "signature": "parse(probe_id: str, raw: bytes) -> dict",
+          "returns": "dict (raises ParseError)"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "questions",
+      "responsibility": "The question bank: for each context kind (a domain snapshot, or one entity such as a process, unit, container, listener or disk), every typed question worth asking, and what each answer means for severity, cause and next step. Pure data.",
+      "files": [
+        "neonwatch/questions/__init__.py",
+        "neonwatch/questions/bank.py"
+      ],
+      "level": 2,
+      "public_interface": [
+        {
+          "name": "bank_for",
+          "signature": "bank_for(kind: ContextKind) -> tuple[Question, ...]",
+          "returns": "tuple[Question, ...]"
+        },
+        {
+          "name": "Question",
+          "signature": "Question(id: str, kind: AnswerKind, instructions: str, options: tuple[Option, ...], levels: tuple[str, ...], meaning: Meaning, stability_check: bool)",
+          "returns": "Question"
+        },
+        {
+          "name": "interpret",
+          "signature": "interpret(question: Question, answer: Answer) -> Reading",
+          "returns": "Reading (severity, cause, next_step, confidence)"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "bus",
+      "responsibility": "The NATS JetStream adapter, and the only thing that imports a NATS client: stream and durable-consumer setup with retention from config, publish with ack, resumable subscribe.",
+      "files": [
+        "neonwatch/bus.py"
+      ],
+      "level": 2,
+      "public_interface": [
+        {
+          "name": "connect",
+          "signature": "connect(url: str, creds: Path | None) -> Bus",
+          "returns": "Bus"
+        },
+        {
+          "name": "publish",
+          "signature": "Bus.publish(event: Event) -> int",
+          "returns": "int (stream sequence)"
+        },
+        {
+          "name": "subscribe",
+          "signature": "Bus.subscribe(subject: str, durable: str) -> AsyncIterator[Event]",
+          "returns": "AsyncIterator[Event]"
+        },
+        {
+          "name": "ensure_streams",
+          "signature": "Bus.ensure_streams(config: Config) -> None",
+          "returns": "None"
+        }
+      ],
+      "owns_adapter_to": [
+        "NATS JetStream (client)"
+      ]
+    },
+    {
+      "name": "store",
+      "responsibility": "The dashboard's query index in SQLite: latest value per probe, rollups for charts, attestations, issues and acknowledgements, and the bounded caches of log explanations by template key and of service descriptions by unit name. One writer (the service), retention from config.",
+      "files": [
+        "neonwatch/store.py"
+      ],
+      "level": 2,
+      "public_interface": [
+        {
+          "name": "Store",
+          "signature": "Store(path: Path, config: Config)",
+          "returns": "Store"
+        },
+        {
+          "name": "apply",
+          "signature": "Store.apply(event: Event) -> None",
+          "returns": "None"
+        },
+        {
+          "name": "latest",
+          "signature": "Store.latest(probe: str | None) -> tuple[tuple[float, Observation], ...]",
+          "returns": "tuple[tuple[float, Observation], ...] (newest first; `at` lets the UI show staleness)"
+        },
+        {
+          "name": "issue",
+          "signature": "Store.issue(issue_id: str) -> Issue | None",
+          "returns": "Issue | None"
+        },
+        {
+          "name": "ack",
+          "signature": "Store.ack(issue_id: str, at: float, by: str = '') -> Issue",
+          "returns": "Issue (KeyError unknown, StoreError resolved)"
+        },
+        {
+          "name": "snooze",
+          "signature": "Store.snooze(issue_id: str, until: float, by: str = '') -> Issue",
+          "returns": "Issue (KeyError unknown, StoreError resolved)"
+        },
+        {
+          "name": "findings",
+          "signature": "Store.findings(since: float | None, latest: bool) -> tuple[tuple[float, Finding], ...]",
+          "returns": "tuple[tuple[float, Finding], ...]"
+        },
+        {
+          "name": "attestations",
+          "signature": "Store.attestations(context, question, since, latest: bool) -> tuple[tuple[float, Attestation], ...]",
+          "returns": "tuple[tuple[float, Attestation], ...]"
+        },
+        {
+          "name": "last_heartbeat",
+          "signature": "Store.last_heartbeat() -> tuple[float, Heartbeat] | None",
+          "returns": "tuple[float, Heartbeat] | None"
+        },
+        {
+          "name": "domains",
+          "signature": "Store.domains() -> dict[str, DomainSummary]",
+          "returns": "dict[str, DomainSummary]"
+        },
+        {
+          "name": "incidents",
+          "signature": "Store.incidents() -> tuple[Incident, ...]",
+          "returns": "tuple[Incident, ...] (link + member issues/findings + missing ids; by severity, score)"
+        },
+        {
+          "name": "save_analysis",
+          "signature": "Store.save_analysis(analysis: Analysis) -> None",
+          "returns": "None"
+        },
+        {
+          "name": "analyses",
+          "signature": "Store.analyses(subject: str | None) -> tuple[Analysis, ...]",
+          "returns": "tuple[Analysis, ...]"
+        },
+        {
+          "name": "series",
+          "signature": "Store.series(probe: str, field: str, since: float, step_s: int) -> tuple[Point, ...]",
+          "returns": "tuple[Point, ...]"
+        },
+        {
+          "name": "issues",
+          "signature": "Store.issues(state: IssueState | None) -> tuple[Issue, ...]",
+          "returns": "tuple[Issue, ...]"
+        },
+        {
+          "name": "prune",
+          "signature": "Store.prune(now: float) -> int",
+          "returns": "int"
+        },
+        {
+          "name": "save_log_explanations",
+          "signature": "Store.save_log_explanations(explanations: Iterable[LogExplanation]) -> int",
+          "returns": "int (rows removed by the least-recently-seen cap)"
+        },
+        {
+          "name": "log_explanations",
+          "signature": "Store.log_explanations(keys: Iterable[str]) -> dict[str, LogExplanation]",
+          "returns": "dict[str, LogExplanation]"
+        },
+        {
+          "name": "touch_log_explanations",
+          "signature": "Store.touch_log_explanations(keys: Iterable[str], at: float) -> None",
+          "returns": "None"
+        },
+        {
+          "name": "save_service_descriptions",
+          "signature": "Store.save_service_descriptions(descriptions: Iterable[ServiceDescription]) -> int",
+          "returns": "rows removed by the MAX_SERVICE_DESCRIPTIONS cap"
+        },
+        {
+          "name": "service_descriptions",
+          "signature": "Store.service_descriptions(names: Iterable[str]) -> dict[str, ServiceDescription]",
+          "returns": "cached descriptions by unit name, each with the service key it was written for"
+        },
+        {
+          "name": "touch_service_descriptions",
+          "signature": "Store.touch_service_descriptions(names: Iterable[str], at: float) -> None",
+          "returns": "None"
+        },
+        {
+          "name": "holds",
+          "signature": "Store.holds() -> dict[str, Hold]",
+          "returns": "each acknowledged or snoozed issue's Hold(by, at, until); by is '' for the dashboard's operator, else agent:<name>"
+        },
+        {
+          "name": "audit",
+          "signature": "Store.audit(at: float, agent: str, action: str, target: str, detail: Mapping) -> None",
+          "returns": "None (keeps the MAX_AUDIT newest rows)"
+        },
+        {
+          "name": "audit_log",
+          "signature": "Store.audit_log(limit: int, agent: str | None, since: float | None) -> tuple[AuditEntry, ...]",
+          "returns": "tuple[AuditEntry, ...] (newest first)"
+        }
+      ],
+      "owns_adapter_to": [
+        "SQLite query database"
+      ]
+    },
+    {
+      "name": "broker",
+      "responsibility": "Runs nats-server for manual mode: writes its config bound to 127.0.0.1, generates one credential per role, and holds the permission policy as data: the agent may only publish observations; the evaluator may read observations and publish judgements and issues; the dashboard and notifier may only read.",
+      "files": [
+        "neonwatch/broker.py"
+      ],
+      "level": 2,
+      "public_interface": [
+        {
+          "name": "permissions",
+          "signature": "permissions(role: Role) -> Permissions",
+          "returns": "Permissions (publish, subscribe allowlists)"
+        },
+        {
+          "name": "render_config",
+          "signature": "render_config(config: Config, passwords: Mapping[Role, str]) -> str",
+          "returns": "str"
+        },
+        {
+          "name": "paths",
+          "signature": "paths(config: Config) -> Paths",
+          "returns": "Paths (read-only: computes, never creates)"
+        },
+        {
+          "name": "run",
+          "signature": "run(config: Config) -> int",
+          "returns": "int"
+        }
+      ],
+      "owns_adapter_to": [
+        "nats-server process, its config and credential files"
+      ]
+    },
+    {
+      "name": "rules",
+      "responsibility": "Deterministic hard alarms over a snapshot: MCE/EDAC, SMART critical, thermal, disk full, crash loops, interface churn, failed units, journald gaps, new 0.0.0.0 listeners, kernel taint.",
+      "files": [
+        "neonwatch/rules.py"
+      ],
+      "level": 2,
+      "public_interface": [
+        {
+          "name": "evaluate",
+          "signature": "evaluate(snapshot: Snapshot, config: Config) -> tuple[Finding, ...]",
+          "returns": "tuple[Finding, ...]"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "judge",
+      "responsibility": "The judge adapter and its own client. Packs each context's questions into as few requests as the context budget allows, runs requests concurrently up to the configured limit, re-asks stability-checked questions with options reversed, and validates every answer against the question asked.",
+      "files": [
+        "neonwatch/judge.py"
+      ],
+      "level": 3,
+      "public_interface": [
+        {
+          "name": "Judge",
+          "signature": "Judge(post: Transport, config: Config)",
+          "returns": "Judge"
+        },
+        {
+          "name": "attest",
+          "signature": "Judge.attest(contexts: Sequence[Context]) -> tuple[Attestation, ...]",
+          "returns": "tuple[Attestation, ...] (each carries question, answer, reading, stable, latency_ms)"
+        },
+        {
+          "name": "health",
+          "signature": "Judge.health() -> JudgeHealth",
+          "returns": "JudgeHealth (reachable, p50/p95 latency, in flight)"
+        }
+      ],
+      "owns_adapter_to": [
+        "The judge /v1/systemone at 127.0.0.1:8200"
+      ]
+    },
+    {
+      "name": "notifier",
+      "responsibility": "Desktop notifications for issues at or above the configured severity: one per issue per state change, deduplicated, rate-limited.",
+      "files": [
+        "neonwatch/notifier.py"
+      ],
+      "level": 2,
+      "public_interface": [
+        {
+          "name": "Notifier",
+          "signature": "Notifier(send: Send, config: Config, clock)",
+          "returns": "Notifier"
+        },
+        {
+          "name": "consider",
+          "signature": "Notifier.consider(issue: Issue) -> Notification | None",
+          "returns": "Notification | None (None when below threshold, duplicate, or rate-limited)"
+        }
+      ],
+      "owns_adapter_to": [
+        "desktop notifications (org.freedesktop.Notifications on the session bus)"
+      ]
+    },
+    {
+      "name": "analyst",
+      "responsibility": "The configured backend LLM, for manual analysis only: an OpenAI-compatible or Anthropic endpoint, local by default. Builds one request from the operator's selection (events, issues, a link, or a time window) plus bounded context, redacts it again, estimates size and destination for the operator to confirm, and returns advisory text. It has no tools and no way to change any state. It also explains kinds of journal line for the Logs view: the uncached templates, packed into as few requests as the budget allows, answered as a JSON object keyed by template key and validated (unknown keys ignored, text bounded). It describes systemd services for the Services view the same way: each service's name, definition and state, keyed by service key, answered as {key: {brief, full}} and validated (unknown keys ignored, both parts required, lengths bounded).",
+      "files": [
+        "neonwatch/analyst.py"
+      ],
+      "level": 2,
+      "public_interface": [
+        {
+          "name": "Analyst",
+          "signature": "Analyst(post: Transport, config: Config)",
+          "returns": "Analyst"
+        },
+        {
+          "name": "estimate",
+          "signature": "Analyst.estimate(request: AnalysisRequest) -> Estimate",
+          "returns": "Estimate (chars, approx tokens, backend, model, remote: bool)"
+        },
+        {
+          "name": "analyze",
+          "signature": "Analyst.analyze(request: AnalysisRequest) -> Analysis",
+          "returns": "Analysis (error set instead of raising when the backend fails)"
+        },
+        {
+          "name": "estimate_logs",
+          "signature": "Analyst.estimate_logs(templates: Sequence[LogTemplate]) -> LogEstimate",
+          "returns": "LogEstimate (chars, approx tokens, backend, model, host, remote, requests, templates)"
+        },
+        {
+          "name": "explain_logs",
+          "signature": "Analyst.explain_logs(templates: Sequence[LogTemplate]) -> LogExplained",
+          "returns": "LogExplained (key -> explanation, model, requests, failed, error; never raises)"
+        },
+        {
+          "name": "estimate_services",
+          "signature": "Analyst.estimate_services(units: Sequence[ServiceUnit]) -> ServiceEstimate",
+          "returns": "ServiceEstimate (chars, approx tokens, backend, model, host, remote, requests, services)"
+        },
+        {
+          "name": "describe_services",
+          "signature": "Analyst.describe_services(units: Sequence[ServiceUnit]) -> ServicesDescribed",
+          "returns": "ServicesDescribed (key -> ServiceText(brief, full), model, requests, failed, error; never raises)"
+        }
+      ],
+      "owns_adapter_to": [
+        "configured analysis LLM backend (OpenAI-compatible or Anthropic API)"
+      ]
+    },
+    {
+      "name": "logs",
+      "responsibility": "The Logs view's reader, in the unprivileged service: runs one fixed journalctl argv on demand (no shell, empty environment, timeout, output cap; the root agent is not involved), decodes each JSON line, redacts every message with redact before anything stores, sends or shows it, and masks a message's variable parts into a template whose short hash keys one kind of line.",
+      "files": [
+        "neonwatch/logs.py"
+      ],
+      "level": 2,
+      "public_interface": [
+        {
+          "name": "read_journal",
+          "signature": "read_journal(timeout_s: float) -> JournalRead",
+          "returns": "JournalRead (lines oldest first, skipped, truncated; error set instead of raising)"
+        },
+        {
+          "name": "parse_line",
+          "signature": "parse_line(entry: dict) -> LogLine",
+          "returns": "LogLine (at, priority, unit, identifier, redacted message, source, template, key)"
+        },
+        {
+          "name": "template_of",
+          "signature": "template_of(text: str) -> str",
+          "returns": "str (numbers, hex, UUIDs, MACs, IPs, durations masked)"
+        },
+        {
+          "name": "template_key",
+          "signature": "template_key(source: str, template: str) -> str",
+          "returns": "str (16 hex characters)"
+        }
+      ],
+      "owns_adapter_to": [
+        "the systemd journal, read as the service's user (journalctl -n 200 -o json)"
+      ]
+    },
+    {
+      "name": "correlator",
+      "responsibility": "The linking pass. Deterministically proposes bounded candidate groups (shared entity, co-occurrence within a window, known patterns), then asks Judge the correlation bank for every candidate at once, and emits Links. Never changes a member.",
+      "files": [
+        "neonwatch/correlator.py"
+      ],
+      "level": 4,
+      "public_interface": [
+        {
+          "name": "candidates",
+          "signature": "candidates(items: Sequence[Item], window_s: float, limit: int) -> tuple[Candidate, ...]",
+          "returns": "tuple[Candidate, ...]"
+        },
+        {
+          "name": "Correlator",
+          "signature": "Correlator(judge: Judge, config: Config)",
+          "returns": "Correlator"
+        },
+        {
+          "name": "link",
+          "signature": "Correlator.link(candidates: Sequence[Candidate]) -> tuple[Link, ...]",
+          "returns": "tuple[Link, ...]"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "executor",
+      "responsibility": "The read-only boundary. Runs catalog entries and nothing else: fixed argv with no shell and no inherited environment; file reads opened O_RDONLY; Docker API GET on allowlisted paths. Timeout, output cap, CPU time measured. Anything off-catalog is refused.",
+      "files": [
+        "neonwatch/executor.py"
+      ],
+      "level": 3,
+      "public_interface": [
+        {
+          "name": "execute",
+          "signature": "execute(spec: ProbeSpec, timeout_s: float, max_bytes: int) -> RawResult",
+          "returns": "RawResult (raises NotInCatalog)"
+        },
+        {
+          "name": "RawResult",
+          "signature": "RawResult(stdout: bytes, exit_code: int, cpu_ms: int, truncated: bool)",
+          "returns": "RawResult"
+        }
+      ],
+      "owns_adapter_to": [
+        "host probe binaries (ss, systemctl, journalctl, nvidia-smi, smartctl, nft, ip)",
+        "docker engine API (GET only)"
+      ]
+    },
+    {
+      "name": "evaluator",
+      "responsibility": "Classification. Keeps a short in-memory window of observations, builds contexts from what changed (one per domain, plus one per entity worth a look), runs rules, asks Judge the whole bank for every context at once, and percolates: deterministic alarms first, then severity by urgency, stability and novelty. A judgement can raise or rank an issue, never clear a deterministic alarm.",
+      "files": [
+        "neonwatch/evaluator.py"
+      ],
+      "level": 5,
+      "public_interface": [
+        {
+          "name": "Evaluator",
+          "signature": "Evaluator(rules, judge: Judge, clock)",
+          "returns": "Evaluator"
+        },
+        {
+          "name": "observe",
+          "signature": "Evaluator.observe(event: Event) -> None",
+          "returns": "None"
+        },
+        {
+          "name": "adopt",
+          "signature": "Evaluator.adopt(issues: Iterable[Issue]) -> None",
+          "returns": "None"
+        },
+        {
+          "name": "contexts",
+          "signature": "Evaluator.contexts(now: float) -> tuple[Context, ...]",
+          "returns": "tuple[Context, ...]"
+        },
+        {
+          "name": "collate",
+          "signature": "Evaluator.collate(now: float) -> Collation",
+          "returns": "Collation (findings, attestations, issue events)"
+        },
+        {
+          "name": "rank",
+          "signature": "rank(issues: Sequence[Issue]) -> tuple[Issue, ...]",
+          "returns": "tuple[Issue, ...]"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "collector",
+      "responsibility": "The privileged observer: root, deterministic, read-only. Staggered, jittered schedule over the catalog; budget accounting that defers probes past the CPU budget; redaction; publishing observations and heartbeats. Runs the write canary at start and publishes whether it is confined.",
+      "files": [
+        "neonwatch/collector.py"
+      ],
+      "level": 4,
+      "public_interface": [
+        {
+          "name": "Collector",
+          "signature": "Collector(catalog, execute, publish, clock, budget: Budget)",
+          "returns": "Collector"
+        },
+        {
+          "name": "tick",
+          "signature": "Collector.tick(now: float) -> tuple[Observation, ...]",
+          "returns": "tuple[Observation, ...]"
+        },
+        {
+          "name": "spend",
+          "signature": "Collector.spend(window_s: float) -> float",
+          "returns": "float (CPU fraction)"
+        },
+        {
+          "name": "write_canary",
+          "signature": "write_canary(paths: tuple[Path, ...]) -> tuple[str, ...]",
+          "returns": "tuple[str, ...] (paths that were WRITABLE)"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "web",
+      "responsibility": "Loopback HTTP with a per-launch token: read API over the store, a server-sent event stream fed from the bus, and one write, acknowledging or snoozing an issue in the monitor's own store.",
+      "files": [
+        "neonwatch/web/__init__.py",
+        "neonwatch/web/app.py"
+      ],
+      "level": 3,
+      "public_interface": [
+        {
+          "name": "make_app",
+          "signature": "make_app(store: Store, live: Live, token: str, config: Config, analyst, *, judge_health, read_logs, agent_token) -> App",
+          "returns": "App"
+        },
+        {
+          "name": "start",
+          "signature": "start(app: App, host: str, port: int) -> Callable[[], Awaitable[None]]",
+          "returns": "the stop function; binds only the given loopback host"
+        },
+        {
+          "name": "routes",
+          "signature": "GET /api/overview, /api/issues, /api/issues/{id}, /api/incidents, /api/domains/{d}, /api/series, /api/health, /api/analyses/{id}, /api/logs, /api/logs/explain/{id}, /api/services/describe/{id}, GET /api/stream (SSE), POST /api/issues/{id}/ack|snooze, POST /api/analyses/estimate, POST /api/analyses, POST /api/logs/estimate, POST /api/logs/explain, POST /api/services/estimate, POST /api/services/describe -> JSON",
+          "returns": "JSON / text/event-stream"
+        },
+        {
+          "name": "agent_routes",
+          "signature": "GET /api/agent/v1/summary, /issues, /issues/{id}, /services, /services/{name}, /scheduled, /logs, /jobs/{id}, /audit; POST /api/agent/v1/issues/{id}/ack|snooze, /jobs/analysis[/estimate], /jobs/describe[/estimate], /jobs/explain[/estimate] -> JSON (docs/agent-api.md)",
+          "returns": "JSON; loopback peers with the agent token and X-Neonwatch-Agent only"
+        }
+      ],
+      "owns_adapter_to": [
+        "browser over HTTP on 127.0.0.1",
+        "local AI agents over HTTP on loopback (the agent API)"
+      ]
+    },
+    {
+      "name": "ui",
+      "responsibility": "The functional dashboard: what needs attention now, why (the attestations behind it), the evidence, and the next read-only check to run. Renders only states the evidence supports; stale and unknown are never drawn as healthy.",
+      "files": [
+        "neonwatch/web/static/index.html",
+        "neonwatch/web/static/app.js",
+        "neonwatch/web/static/app.css"
+      ],
+      "level": 4,
+      "public_interface": [
+        {
+          "name": "contract",
+          "signature": "consumes web.routes; renders Issue, Attestation, Observation, Heartbeat",
+          "returns": "DOM"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "service",
+      "responsibility": "The unprivileged composition root, run in your desktop session: wires config, bus, store, evaluator, web, notifier and analyst.",
+      "files": [
+        "neonwatch/service.py"
+      ],
+      "level": 6,
+      "public_interface": [
+        {
+          "name": "main",
+          "signature": "main(argv: list[str]) -> int",
+          "returns": "int"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "launcher",
+      "responsibility": "The CLI. `neonwatch broker` and `neonwatch service` refuse to run as root; `sudo neonwatch agent` refuses to run as anything else. Manual launch now; systemd later.",
+      "files": [
+        "neonwatch/launch.py"
+      ],
+      "level": 7,
+      "public_interface": [
+        {
+          "name": "main",
+          "signature": "main(argv: list[str]) -> int",
+          "returns": "int"
+        },
+        {
+          "name": "require_uid",
+          "signature": "require_uid(role: Role, uid: int) -> None",
+          "returns": "None (raises WrongUser)"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "jobs",
+      "responsibility": "Joins the latest parsed cron and systemd observations into the job and service records the evaluator and the dashboard both read: stable job ids, the static part that is the judge's context state, and the volatile last/next/result. Pure functions over dicts; imports nothing in this design.",
+      "files": [
+        "neonwatch/jobs.py"
+      ],
+      "level": 1,
+      "public_interface": [
+        {
+          "name": "scheduled",
+          "signature": "scheduled(latest: Mapping[str, Mapping[str, Any]]) -> tuple[list[dict[str, Any]], int]",
+          "returns": "(jobs sorted by id, skipped count)"
+        },
+        {
+          "name": "services",
+          "signature": "services(latest: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]",
+          "returns": "one record per loaded service"
+        },
+        {
+          "name": "service_key",
+          "signature": "service_key(service: Mapping[str, Any]) -> str",
+          "returns": "16-hex hash of the service's name, description, exec, file and user"
+        },
+        {
+          "name": "PROBES",
+          "signature": "PROBES: frozenset[str]",
+          "returns": "the probe ids these read"
+        }
+      ],
+      "owns_adapter_to": []
+    },
+    {
+      "name": "agent_token",
+      "responsibility": "The local agent API's long-lived credential: one token in a 0600 file beside the store, created by the service when missing (O_EXCL), read with the config loader's care (no symlink, regular, owner, no group/other bits), rotated atomically.",
+      "files": [
+        "neonwatch/agent_token.py"
+      ],
+      "level": 2,
+      "public_interface": [
+        {
+          "name": "path",
+          "signature": "path(config: Config) -> Path",
+          "returns": "Path (<store dir>/agent.token)"
+        },
+        {
+          "name": "read",
+          "signature": "read(where: Path, owner: int) -> str",
+          "returns": "str (raises TokenError)"
+        },
+        {
+          "name": "ensure",
+          "signature": "ensure(where: Path, owner: int) -> tuple[str, bool]",
+          "returns": "(token, created) (raises TokenError)"
+        },
+        {
+          "name": "rotate",
+          "signature": "rotate(where: Path, owner: int) -> str",
+          "returns": "str, the new token (raises TokenError)"
+        }
+      ],
+      "owns_adapter_to": [
+        "the agent token file in the service's state directory"
+      ]
+    },
+    {
+      "name": "mcp",
+      "responsibility": "`neonwatch mcp`: a zero-dependency stdio MCP server (JSON-RPC on stdin/stdout) whose tools each call the dashboard's local agent API on loopback with the agent token and an X-Neonwatch-Agent name; every failure is an isError result.",
+      "files": [
+        "neonwatch/mcp.py"
+      ],
+      "level": 3,
+      "public_interface": [
+        {
+          "name": "main",
+          "signature": "main(config: Config, *, uid: int, agent: str | None, environ: Mapping) -> int",
+          "returns": "int (serves until stdin ends; 2 for an unusable agent name)"
+        },
+        {
+          "name": "TOOLS",
+          "signature": "TOOLS: list[dict]",
+          "returns": "status, list_issues, get_issue, acknowledge_issue, snooze_issue, list_services, get_service, list_scheduled, read_logs, estimate_/start_analysis, estimate_/start_service_descriptions, estimate_/start_log_explanations, get_job, audit"
+        }
+      ],
+      "owns_adapter_to": [
+        "MCP clients over stdio",
+        "the dashboard's agent API over HTTP on loopback (client)"
+      ]
+    }
+  ],
+  "levels": [
+    {
+      "component": "schema",
+      "level": 1
+    },
+    {
+      "component": "redact",
+      "level": 1
+    },
+    {
+      "component": "config",
+      "level": 1
+    },
+    {
+      "component": "probes",
+      "level": 2
+    },
+    {
+      "component": "questions",
+      "level": 2
+    },
+    {
+      "component": "bus",
+      "level": 2
+    },
+    {
+      "component": "store",
+      "level": 2
+    },
+    {
+      "component": "broker",
+      "level": 2
+    },
+    {
+      "component": "rules",
+      "level": 2
+    },
+    {
+      "component": "judge",
+      "level": 3
+    },
+    {
+      "component": "notifier",
+      "level": 2
+    },
+    {
+      "component": "analyst",
+      "level": 2
+    },
+    {
+      "component": "logs",
+      "level": 2
+    },
+    {
+      "component": "correlator",
+      "level": 4
+    },
+    {
+      "component": "executor",
+      "level": 3
+    },
+    {
+      "component": "evaluator",
+      "level": 5
+    },
+    {
+      "component": "collector",
+      "level": 4
+    },
+    {
+      "component": "web",
+      "level": 3
+    },
+    {
+      "component": "ui",
+      "level": 4
+    },
+    {
+      "component": "service",
+      "level": 6
+    },
+    {
+      "component": "launcher",
+      "level": 7
+    },
+    {
+      "component": "jobs",
+      "level": 1
+    },
+    {
+      "component": "agent_token",
+      "level": 2
+    },
+    {
+      "component": "mcp",
+      "level": 3
+    }
+  ],
+  "level_1_depends_on_nothing_in_this_design": [
+    "schema",
+    "redact",
+    "config"
+  ],
+  "dependency_edges": [
+    {
+      "component": "probes",
+      "depends_on": "schema"
+    },
+    {
+      "component": "probes",
+      "depends_on": "redact"
+    },
+    {
+      "component": "questions",
+      "depends_on": "schema"
+    },
+    {
+      "component": "bus",
+      "depends_on": "schema"
+    },
+    {
+      "component": "bus",
+      "depends_on": "config"
+    },
+    {
+      "component": "store",
+      "depends_on": "schema"
+    },
+    {
+      "component": "store",
+      "depends_on": "config"
+    },
+    {
+      "component": "broker",
+      "depends_on": "config"
+    },
+    {
+      "component": "broker",
+      "depends_on": "schema"
+    },
+    {
+      "component": "rules",
+      "depends_on": "schema"
+    },
+    {
+      "component": "rules",
+      "depends_on": "config"
+    },
+    {
+      "component": "judge",
+      "depends_on": "schema"
+    },
+    {
+      "component": "judge",
+      "depends_on": "redact"
+    },
+    {
+      "component": "judge",
+      "depends_on": "config"
+    },
+    {
+      "component": "judge",
+      "depends_on": "questions"
+    },
+    {
+      "component": "notifier",
+      "depends_on": "schema"
+    },
+    {
+      "component": "notifier",
+      "depends_on": "config"
+    },
+    {
+      "component": "executor",
+      "depends_on": "probes"
+    },
+    {
+      "component": "analyst",
+      "depends_on": "schema"
+    },
+    {
+      "component": "analyst",
+      "depends_on": "redact"
+    },
+    {
+      "component": "analyst",
+      "depends_on": "config"
+    },
+    {
+      "component": "correlator",
+      "depends_on": "schema"
+    },
+    {
+      "component": "correlator",
+      "depends_on": "questions"
+    },
+    {
+      "component": "correlator",
+      "depends_on": "judge"
+    },
+    {
+      "component": "correlator",
+      "depends_on": "config"
+    },
+    {
+      "component": "evaluator",
+      "depends_on": "rules"
+    },
+    {
+      "component": "evaluator",
+      "depends_on": "judge"
+    },
+    {
+      "component": "evaluator",
+      "depends_on": "questions"
+    },
+    {
+      "component": "evaluator",
+      "depends_on": "schema"
+    },
+    {
+      "component": "evaluator",
+      "depends_on": "correlator"
+    },
+    {
+      "component": "evaluator",
+      "depends_on": "probes"
+    },
+    {
+      "component": "evaluator",
+      "depends_on": "config"
+    },
+    {
+      "component": "collector",
+      "depends_on": "probes"
+    },
+    {
+      "component": "collector",
+      "depends_on": "executor"
+    },
+    {
+      "component": "collector",
+      "depends_on": "schema"
+    },
+    {
+      "component": "collector",
+      "depends_on": "redact"
+    },
+    {
+      "component": "collector",
+      "depends_on": "config"
+    },
+    {
+      "component": "web",
+      "depends_on": "store"
+    },
+    {
+      "component": "web",
+      "depends_on": "schema"
+    },
+    {
+      "component": "web",
+      "depends_on": "config"
+    },
+    {
+      "component": "web",
+      "depends_on": "analyst"
+    },
+    {
+      "component": "web",
+      "depends_on": "probes"
+    },
+    {
+      "component": "ui",
+      "depends_on": "web"
+    },
+    {
+      "component": "service",
+      "depends_on": "config"
+    },
+    {
+      "component": "service",
+      "depends_on": "bus"
+    },
+    {
+      "component": "service",
+      "depends_on": "store"
+    },
+    {
+      "component": "service",
+      "depends_on": "evaluator"
+    },
+    {
+      "component": "service",
+      "depends_on": "web"
+    },
+    {
+      "component": "service",
+      "depends_on": "notifier"
+    },
+    {
+      "component": "service",
+      "depends_on": "analyst"
+    },
+    {
+      "component": "service",
+      "depends_on": "rules"
+    },
+    {
+      "component": "service",
+      "depends_on": "judge"
+    },
+    {
+      "component": "service",
+      "depends_on": "correlator"
+    },
+    {
+      "component": "service",
+      "depends_on": "broker"
+    },
+    {
+      "component": "service",
+      "depends_on": "schema"
+    },
+    {
+      "component": "launcher",
+      "depends_on": "config"
+    },
+    {
+      "component": "launcher",
+      "depends_on": "broker"
+    },
+    {
+      "component": "launcher",
+      "depends_on": "bus"
+    },
+    {
+      "component": "launcher",
+      "depends_on": "collector"
+    },
+    {
+      "component": "launcher",
+      "depends_on": "service"
+    },
+    {
+      "component": "launcher",
+      "depends_on": "probes"
+    },
+    {
+      "component": "launcher",
+      "depends_on": "executor"
+    },
+    {
+      "component": "evaluator",
+      "depends_on": "jobs"
+    },
+    {
+      "component": "web",
+      "depends_on": "jobs"
+    },
+    {
+      "component": "logs",
+      "depends_on": "redact"
+    },
+    {
+      "component": "web",
+      "depends_on": "logs"
+    },
+    {
+      "component": "service",
+      "depends_on": "logs"
+    },
+    {
+      "component": "agent_token",
+      "depends_on": "config"
+    },
+    {
+      "component": "service",
+      "depends_on": "agent_token"
+    },
+    {
+      "component": "service",
+      "depends_on": "jobs"
+    },
+    {
+      "component": "mcp",
+      "depends_on": "config"
+    },
+    {
+      "component": "mcp",
+      "depends_on": "agent_token"
+    },
+    {
+      "component": "launcher",
+      "depends_on": "agent_token"
+    },
+    {
+      "component": "launcher",
+      "depends_on": "mcp"
+    }
+  ],
+  "acyclic": true,
+  "open_questions": []
+}

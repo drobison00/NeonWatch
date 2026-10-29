@@ -1,0 +1,29 @@
+#!/bin/sh
+# Fetch the pinned nats-server for this machine's architecture into .tools/, verified against the
+# SHA-256 pinned below before anything is installed. Run as yourself, never with sudo.
+set -eu
+VERSION=v2.15.0
+# Pinned in the repo, so a substituted release cannot bring its own matching SHA256SUMS.
+# Values from the v2.15.0 release's SHA256SUMS, recorded 2026-10-12.
+case "$(uname -m)" in
+    x86_64|amd64) arch=amd64
+        sha=5d2c51caca950333aba84911df7d377f826f3a59ec36061c6539105084f65c92 ;;
+    aarch64|arm64) arch=arm64
+        sha=cdc208f5a3f42963a52b6ab06ef65626bb870315dc936e26ba571780c6351112 ;;
+    *) echo "fetch-nats-server: unsupported architecture $(uname -m)" >&2; exit 1 ;;
+esac
+if [ "$(id -u)" = 0 ]; then
+    echo "fetch-nats-server: run this as yourself, not root" >&2; exit 1
+fi
+repo=$(cd "$(dirname "$0")/.." && pwd)
+name="nats-server-$VERSION-linux-$arch"
+base="https://github.com/nats-io/nats-server/releases/download/$VERSION"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cd "$work"
+curl -fsSLO "$base/$name.tar.gz"
+echo "$sha  $name.tar.gz" | sha256sum -c -
+tar -xzf "$name.tar.gz"
+mkdir -p "$repo/.tools"
+install -m 0755 "$name/nats-server" "$repo/.tools/nats-server"
+"$repo/.tools/nats-server" --version

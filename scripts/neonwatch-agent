@@ -1,0 +1,14 @@
+#!/bin/sh
+# The only supported way to start the root agent:  sudo scripts/neonwatch-agent [--config PATH]
+#
+# Runs the repository venv's interpreter directly, isolated (-I: no user site, no PYTHON*
+# variables, no current directory on the path) and without writing bytecode (-B). Never through
+# the project tool, which would sync the venv and write caches as root.
+set -eu
+repo=$(dirname "$(dirname "$(readlink -f "$0")")")
+python="$repo/.venv/bin/python"
+if [ ! -x "$python" ]; then
+    echo "neonwatch-agent: $python is missing; run 'uv sync' in $repo as yourself (never as root) first" >&2
+    exit 1
+fi
+exec "$python" -I -B -m neonwatch.launch agent "$@"

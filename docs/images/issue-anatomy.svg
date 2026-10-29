@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 930" width="1280" height="930" role="img" aria-labelledby="t d">
+  <title id="t">How an issue is raised, and how to read its card</title>
+  <desc id="d">Every five minutes the service collates what the agent observed. Deterministic rules turn measured data into findings with evidence, a reason and a next step; the judge answers typed questions about what changed, and each answer that can raise or rank an issue keeps the evidence it was asked over. Both feed one issue per thing, at the worst severity either gives, and a judgement can never clear or lower what a rule raised. Below, an annotated issue card: a title in words, who raised it, what happened, when it was last seen, a check that still works after the fact, and a Why button for why it matters and how sure the monitor is.</desc>
+  <defs>
+    <style>
+      .bg { fill: #06050b; }
+      .grid { stroke: #141126; stroke-width: 1; }
+      .box { fill: #141126; stroke: #3a3062; stroke-width: 1.5; }
+      .box-c { fill: #141126; stroke: #00f0ff; stroke-width: 1.8; }
+      .box-r { fill: #141126; stroke: #ff3864; stroke-width: 1.8; }
+      .box-y { fill: #141126; stroke: #f3ff4a; stroke-width: 1.8; }
+      .title { font: 700 26px "Orbitron", "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; letter-spacing: 4px; }
+      .sec { font: 700 15px "Orbitron", "DejaVu Sans", "Segoe UI", sans-serif; fill: #ff2bd6; letter-spacing: 2.5px; }
+      .sub { font: 15px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .h { font: 700 16px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .s { font: 13.5px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .t { font: 13.5px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .m { font: 13px "DejaVu Sans Mono", "Share Tech Mono", Consolas, monospace; fill: #00f0ff; }
+      .flow { stroke: #00f0ff; stroke-width: 2.2; fill: none; }
+      .flow-m { stroke: #ff2bd6; stroke-width: 2.2; fill: none; }
+      .lead { stroke: #ff2bd6; stroke-width: 1.4; fill: none; stroke-dasharray: 4 3; }
+      .num { fill: #ff2bd6; }
+      .num-t { font: 700 14px "DejaVu Sans", sans-serif; fill: #06050b; }
+      .card { fill: #0d0b17; stroke: #3a3062; stroke-width: 1.2; }
+      .warnbar { fill: #f3ff4a; }
+      .sev { font: 700 14px "DejaVu Sans", sans-serif; fill: #f3ff4a; }
+      .ctitle { font: 700 15px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .badge { fill: #e8e3ff; }
+      .badge-t { font: 700 11.5px "DejaVu Sans Mono", Consolas, monospace; fill: #06050b; letter-spacing: 1px; }
+      .meta { font: 12.5px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .meta-e { font: 12.5px "DejaVu Sans Mono", Consolas, monospace; fill: #e8e3ff; }
+      .code { fill: #06050b; stroke: #f3ff4a; stroke-width: 1; }
+      .code-t { font: 12.5px "DejaVu Sans Mono", Consolas, monospace; fill: #f3ff4a; }
+      .gone { font: 12.5px "DejaVu Sans", "Segoe UI", sans-serif; fill: #f3ff4a; }
+      .btn { fill: #06050b; stroke: #00f0ff; stroke-width: 1; }
+      .btn-t { font: 13px "DejaVu Sans Mono", Consolas, monospace; fill: #00f0ff; }
+      .ann-h { font: 700 14.5px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .ann { font: 13.5px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+    </style>
+    <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#00f0ff"/></marker>
+    <marker id="am" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#ff2bd6"/></marker>
+    <pattern id="g" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" class="grid" fill="none"/></pattern>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect class="bg" width="1280" height="930"/>
+  <rect width="1280" height="930" fill="url(#g)"/>
+  <text x="40" y="54" class="title">HOW AN ISSUE IS RAISED</text>
+  <text x="40" y="80" class="sub">Measured facts and model judgements meet in one issue per thing. A judgement can raise or rank it, never clear it.</text>
+
+  <!-- flow row -->
+  <rect x="40" y="120" width="200" height="132" rx="4" class="box"/>
+  <text x="56" y="148" class="h">Observation</text>
+  <text x="56" y="172" class="t">one probe run, at its</text>
+  <text x="56" y="192" class="t">cadence; redacted</text>
+  <text x="56" y="212" class="t">before it leaves root</text>
+  <text x="56" y="238" class="m">ps · sensors · journal …</text>
+
+  <rect x="290" y="120" width="190" height="132" rx="4" class="box"/>
+  <text x="306" y="148" class="h">Collation</text>
+  <text x="306" y="172" class="t">every 5 minutes, over</text>
+  <text x="306" y="192" class="t">the latest observation</text>
+  <text x="306" y="212" class="t">of every probe</text>
+  <text x="306" y="238" class="m">cadence.collate</text>
+
+  <rect x="530" y="100" width="300" height="104" rx="4" class="box-r"/>
+  <text x="546" y="126" class="h">Rules · measured fact</text>
+  <text x="546" y="150" class="t">a finding with its evidence,</text>
+  <text x="546" y="170" class="t">why it matters, and a check</text>
+  <text x="546" y="192" class="m">process.runs_from_tmp …</text>
+
+  <rect x="530" y="222" width="300" height="104" rx="4" class="box-c"/>
+  <text x="546" y="248" class="h">Judge · typed judgement</text>
+  <text x="546" y="272" class="t">probability, choice or scale;</text>
+  <text x="546" y="292" class="t">a loud answer keeps the</text>
+  <text x="546" y="312" class="t">evidence it was asked over</text>
+
+  <rect x="880" y="120" width="360" height="190" rx="4" class="box-y" filter="url(#glow)"/>
+  <text x="898" y="148" class="h">Issue</text>
+  <text x="898" y="174" class="t">· one per thing (a process, a disk, a unit)</text>
+  <text x="898" y="196" class="t">· severity: the worst either gives</text>
+  <text x="898" y="218" class="t">· title, evidence, why, next check</text>
+  <text x="898" y="240" class="t">· last seen: still there, or gone</text>
+  <text x="898" y="268" class="s">resolved after 3 collations without</text>
+  <text x="898" y="288" class="s">its conditions; held when you ack or snooze</text>
+
+  <path d="M240 186 H284" class="flow" marker-end="url(#ac)"/>
+  <path d="M480 170 Q505 170 505 152 H524" class="flow" marker-end="url(#ac)"/>
+  <path d="M480 210 Q505 210 505 274 H524" class="flow" marker-end="url(#ac)"/>
+  <path d="M830 152 H854 Q866 152 866 170 H874" class="flow-m" marker-end="url(#am)"/>
+  <path d="M830 274 H854 Q866 274 866 260 H874" class="flow" marker-end="url(#ac)"/>
+  <text x="836" y="140" class="s">facts</text>
+  <text x="836" y="296" class="s">rank</text>
+
+  <text x="40" y="362" class="s">Then: shown live on the dashboard · related issues grouped into an incident with a likely cause · a desktop notification at or above notify.min_severity.</text>
+
+  <!-- card anatomy -->
+  <text x="40" y="418" class="sec">// READING AN ISSUE CARD</text>
+
+  <rect x="40" y="440" width="760" height="300" rx="2" class="card"/>
+  <rect x="40" y="440" width="5" height="300" class="warnbar"/>
+  <text x="62" y="472" class="sev">⚠ WARN</text>
+  <text x="140" y="472" class="ctitle">A program is running from /tmp: /tmp/go-build4127/b001/exe/main</text>
+  <text x="742" y="472" class="meta">10 min</text>
+
+  <rect x="62" y="486" width="138" height="20" class="badge"/>
+  <text x="70" y="501" class="badge-t">RULE · HARD FACT</text>
+  <text x="212" y="501" class="meta">processes</text>
+  <text x="290" y="501" class="meta-e">process:3320260</text>
+  <text x="430" y="501" class="meta">process.runs_from_tmp, suspicious</text>
+
+  <text x="62" y="538" class="meta">What</text>
+  <rect x="104" y="522" width="336" height="24" class="code"/>
+  <text x="112" y="539" class="code-t">/tmp/go-build4127/b001/exe/main --serve</text>
+  <text x="448" y="539" class="meta">pid 3320260 · user alice · parent 3320257</text>
+  <text x="104" y="562" class="meta">0 s old · 529% CPU · 32 threads</text>
+
+  <text x="62" y="592" class="gone">Not seen since 11:04:01 (10 min ago): it stays open until absent three collations in a row.</text>
+
+  <text x="62" y="630" class="meta">Next check</text>
+  <text x="62" y="646" class="meta">(it may be gone)</text>
+  <rect x="172" y="614" width="610" height="44" class="code"/>
+  <text x="180" y="632" class="code-t">ps -o pid,ppid,user,lstart,args -p 3320260,3320257;</text>
+  <text x="180" y="650" class="code-t">journalctl --since @1793293342 --until @1793293412 -o short-iso …</text>
+
+  <rect x="62" y="680" width="70" height="30" class="btn"/><text x="74" y="700" class="btn-t">Why?</text>
+  <rect x="142" y="680" width="116" height="30" class="btn"/><text x="152" y="700" class="btn-t">Acknowledge</text>
+  <text x="270" y="700" class="meta">Snooze</text>
+  <rect x="322" y="680" width="36" height="30" class="btn"/><text x="330" y="700" class="btn-t">1h</text>
+  <rect x="364" y="680" width="36" height="30" class="btn"/><text x="372" y="700" class="btn-t">8h</text>
+  <rect x="406" y="680" width="46" height="30" class="btn"/><text x="414" y="700" class="btn-t">24h</text>
+
+  <!-- markers on the card -->
+  <circle cx="808" cy="466" r="12" class="num"/><text x="803" y="471" class="num-t">1</text>
+  <circle cx="808" cy="496" r="12" class="num"/><text x="803" y="501" class="num-t">2</text>
+  <circle cx="808" cy="538" r="12" class="num"/><text x="803" y="543" class="num-t">3</text>
+  <circle cx="808" cy="588" r="12" class="num"/><text x="803" y="593" class="num-t">4</text>
+  <circle cx="808" cy="636" r="12" class="num"/><text x="803" y="641" class="num-t">5</text>
+  <circle cx="808" cy="695" r="12" class="num"/><text x="803" y="700" class="num-t">6</text>
+  <path d="M796 696 H470" class="lead"/>
+
+  <!-- annotations -->
+  <g transform="translate(850 450)">
+    <text x="0" y="14" class="ann-h">1 · What, in words</text>
+    <text x="0" y="33" class="ann">The rule's title, or the judge's cause and</text>
+    <text x="0" y="50" class="ann">the thing it is about, named from its evidence.</text>
+    <text x="0" y="76" class="ann-h">2 · Who raised it</text>
+    <text x="0" y="95" class="ann">RULE · HARD FACT, or JUDGED · your judge's</text>
+    <text x="0" y="112" class="ann">[judge] name. Every reason is listed.</text>
+    <text x="0" y="138" class="ann-h">3 · What happened</text>
+    <text x="0" y="157" class="ann">The evidence it was raised on, kept when it</text>
+    <text x="0" y="174" class="ann">was judged, so it outlives the process.</text>
+    <text x="0" y="200" class="ann-h">4 · Still there?</text>
+    <text x="0" y="219" class="ann">When its conditions were last seen, and</text>
+    <text x="0" y="236" class="ann">a warning when the check may find nothing.</text>
+    <text x="0" y="262" class="ann-h">5 · What to do</text>
+    <text x="0" y="281" class="ann">A read-only check to copy, never run for you;</text>
+    <text x="0" y="298" class="ann">this one still answers after the process exits.</text>
+    <text x="0" y="324" class="ann-h">6 · Why?</text>
+    <text x="0" y="343" class="ann">Why it matters and how sure, in words; the</text>
+    <text x="0" y="360" class="ann">judge's own answers, folded underneath.</text>
+  </g>
+
+  <text x="40" y="872" class="s">Severity is always text, glyph and colour: ◆ CRITICAL · ⚠ WARN · ● WATCH · ○ INFO. A domain with no current answers is drawn as unknown, never as fine.</text>
+  <text x="40" y="898" class="s">The card's check, evidence and reasons come from the same issue the agent API and the MCP tools return (docs/agent-api.md).</text>
+</svg>

@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 820" width="1280" height="820" role="img" aria-labelledby="t d">
+  <title id="t">Two models, two jobs: the judge and the analyst</title>
+  <desc id="d">The judge is a fast System 1 classifier asked automatically at every collation; it answers typed questions over redacted state, on loopback only, and its answers can raise or rank issues but never clear them. The analyst is a slower System 2 language model asked only on request, after an estimate is confirmed; it writes plain text and cannot change anything. Both are optional, configured in [judge] and [analyst], and only the unprivileged service talks to either.</desc>
+  <defs>
+    <style>
+      .bg { fill: #06050b; }
+      .grid { stroke: #141126; stroke-width: 1; }
+      .panel { fill: #0d0b17; stroke-width: 2; }
+      .c { stroke: #00f0ff; }
+      .y { stroke: #f3ff4a; }
+      .box { fill: #141126; stroke: #3a3062; stroke-width: 1.5; }
+      .title { font: 700 26px "Orbitron", "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; letter-spacing: 4px; }
+      .sub { font: 15px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .k { font: 700 22px "Orbitron", "DejaVu Sans", "Segoe UI", sans-serif; letter-spacing: 3px; }
+      .tag { font: 700 13px "DejaVu Sans Mono", Consolas, monospace; letter-spacing: 1.5px; }
+      .rowk { font: 700 12.5px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; letter-spacing: 1.5px; }
+      .rowv { font: 15px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .m { font: 13.5px "DejaVu Sans Mono", "Share Tech Mono", Consolas, monospace; }
+      .h { font: 700 16px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .s { font: 14px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .flow { stroke-width: 2.2; fill: none; }
+    </style>
+    <pattern id="g" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" class="grid" fill="none"/></pattern>
+    <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#00f0ff"/></marker>
+    <marker id="ay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f3ff4a"/></marker>
+    <filter id="glow" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect class="bg" width="1280" height="820"/>
+  <rect width="1280" height="820" fill="url(#g)"/>
+  <text x="40" y="54" class="title">TWO MODELS, TWO JOBS</text>
+  <text x="40" y="80" class="sub">Both optional, both reached only by the unprivileged service. Without them the deterministic rules still raise every hard alarm.</text>
+
+  <!-- service in the middle -->
+  <rect x="530" y="112" width="220" height="92" rx="4" class="box"/>
+  <text x="548" y="140" class="h">neonwatch service</text>
+  <text x="548" y="162" class="s">runs as you; redacts</text>
+  <text x="548" y="182" class="s">everything it sends</text>
+  <path d="M530 158 H452 V232" class="flow" stroke="#00f0ff" marker-end="url(#ac)"/>
+  <path d="M750 158 H828 V232" class="flow" stroke="#f3ff4a" stroke-dasharray="7 5" marker-end="url(#ay)"/>
+  <text x="428" y="146" class="s">every 5 min</text>
+  <text x="760" y="146" class="s">on request</text>
+
+  <!-- judge panel -->
+  <rect x="40" y="240" width="580" height="540" rx="4" class="panel c" filter="url(#glow)"/>
+  <text x="64" y="282" class="k" fill="#00f0ff">THE JUDGE</text>
+  <text x="250" y="282" class="tag" fill="#00f0ff">SYSTEM 1 · FAST · TYPED</text>
+  <text x="64" y="306" class="m" fill="#8f88b3">[judge]  name · url · model · concurrency · …</text>
+
+  <text x="64" y="350" class="rowk">WHEN</text>
+  <text x="190" y="350" class="rowv">Automatically, at every collation (5 min),</text>
+  <text x="190" y="372" class="rowv">for each context that changed.</text>
+  <text x="64" y="414" class="rowk">IS ASKED</text>
+  <text x="190" y="414" class="rowv">Closed questions from a fixed bank: is this</text>
+  <text x="190" y="436" class="rowv">process suspicious? how soon does this matter?</text>
+  <text x="64" y="478" class="rowk">SEES</text>
+  <text x="190" y="478" class="rowv">The redacted state of one context, cut to</text>
+  <text x="190" y="500" class="rowv">max_state_chars.</text>
+  <text x="64" y="542" class="rowk">ANSWERS</text>
+  <text x="190" y="542" class="rowv">Numbers only: a probability, one of a fixed</text>
+  <text x="190" y="564" class="rowv">set of choices, or a position on a scale.</text>
+  <text x="64" y="606" class="rowk">CAN</text>
+  <text x="190" y="606" class="rowv">Raise or rank an issue, name a likely cause.</text>
+  <text x="190" y="628" class="rowv">Never clear or lower what a rule raised.</text>
+  <text x="64" y="670" class="rowk">WHERE</text>
+  <text x="190" y="670" class="rowv">This machine only: plain http to loopback.</text>
+  <text x="64" y="712" class="rowk">YOU SEE IT</text>
+  <text x="190" y="712" class="rowv">Under the name you give it: the top bar,</text>
+  <text x="190" y="734" class="rowv">JUDGED · &lt;NAME&gt; badges, each answer.</text>
+
+  <!-- analyst panel -->
+  <rect x="660" y="240" width="580" height="540" rx="4" class="panel y" filter="url(#glow)"/>
+  <text x="684" y="282" class="k" fill="#f3ff4a">THE ANALYST</text>
+  <text x="904" y="282" class="tag" fill="#f3ff4a">SYSTEM 2 · SLOW · PROSE</text>
+  <text x="684" y="306" class="m" fill="#8f88b3">[analyst]  provider · base_url · model · reach · …</text>
+
+  <text x="684" y="350" class="rowk">WHEN</text>
+  <text x="810" y="350" class="rowv">Only when you ask, after you confirm an</text>
+  <text x="810" y="372" class="rowv">estimate. Local AI agents skip the confirm.</text>
+  <text x="684" y="414" class="rowk">IS ASKED</text>
+  <text x="810" y="414" class="rowv">Explain these issues or this window, explain</text>
+  <text x="810" y="436" class="rowv">these log lines, describe these services.</text>
+  <text x="684" y="478" class="rowk">SEES</text>
+  <text x="810" y="478" class="rowv">What you selected and its context, redacted</text>
+  <text x="810" y="500" class="rowv">again, cut to max_input_chars.</text>
+  <text x="684" y="542" class="rowk">ANSWERS</text>
+  <text x="810" y="542" class="rowv">Plain text: likely causes, how items relate,</text>
+  <text x="810" y="564" class="rowv">checks to copy. Up to max_output_tokens.</text>
+  <text x="684" y="606" class="rowk">CAN</text>
+  <text x="810" y="606" class="rowv">Nothing. Its answer is advice: it changes no</text>
+  <text x="810" y="628" class="rowv">issue, no link, nothing on the host.</text>
+  <text x="684" y="670" class="rowk">WHERE</text>
+  <text x="810" y="670" class="rowv">As far as reach allows: local, LAN or remote,</text>
+  <text x="810" y="692" class="rowv">https beyond your LAN, or with a key.</text>
+  <text x="684" y="734" class="rowk">YOU SEE IT</text>
+  <text x="810" y="734" class="rowv">LLM · ADVISORY panels, and by model name.</text>
+</svg>

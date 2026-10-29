@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      # Pinned to commits: a tag can be moved. actions/checkout v5.1.0, astral-sh/setup-uv v6.8.0.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --frozen --extra dev
+      - run: scripts/fetch-nats-server
+      - run: uv run --frozen ruff check neonwatch/ tools/ scripts/
+      - run: uv run --frozen python tools/gates.py
+      - run: uv run --frozen pytest -q --cov

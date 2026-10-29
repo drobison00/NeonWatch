@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 860" width="1280" height="860" role="img" aria-labelledby="t d">
+  <title id="t">How NeonWatch fits together</title>
+  <desc id="d">A root agent reads the machine with a fixed list of read-only commands and publishes observations, with a publish-only credential, to a NATS broker running as your user. The unprivileged service evaluates them with deterministic rules and an optional local judge, keeps a SQLite store, and serves a loopback dashboard and agent API. An optional analyst model is asked only on request. Nothing flows into the root agent except the machine's own state, its config and its broker credential.</desc>
+  <defs>
+    <style>
+      .bg { fill: #06050b; }
+      .grid { stroke: #141126; stroke-width: 1; }
+      .zone { fill: #0d0b17; stroke-width: 2; }
+      .root { stroke: #ff3864; }
+      .user { stroke: #00f0ff; }
+      .models { stroke: #f3ff4a; stroke-dasharray: 9 6; }
+      .zone-label { font: 700 15px "Orbitron", "DejaVu Sans", "Segoe UI", sans-serif; letter-spacing: 2.5px; }
+      .box { fill: #141126; stroke: #3a3062; stroke-width: 1.5; }
+      .box-hot { fill: #141126; stroke: #00f0ff; stroke-width: 1.5; }
+      .h { font: 700 17px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .s { font: 14px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .m { font: 13.5px "DejaVu Sans Mono", "Share Tech Mono", Consolas, monospace; fill: #00f0ff; }
+      .my { font: 13.5px "DejaVu Sans Mono", "Share Tech Mono", Consolas, monospace; fill: #f3ff4a; }
+      .lbl { font: 13px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .lbl-m { font: 13px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .flow { stroke: #00f0ff; stroke-width: 2.2; fill: none; }
+      .flow-r { stroke: #ff2bd6; stroke-width: 2.2; fill: none; }
+      .flow-y { stroke: #f3ff4a; stroke-width: 2; fill: none; stroke-dasharray: 7 5; }
+      .pill { fill: #06050b; stroke: #3a3062; stroke-width: 1; }
+      .num { fill: #ff2bd6; }
+      .num-t { font: 700 14px "DejaVu Sans", sans-serif; fill: #06050b; }
+      .title { font: 700 26px "Orbitron", "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; letter-spacing: 4px; }
+      .sub { font: 15px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .note { font: 14px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+    </style>
+    <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#00f0ff"/></marker>
+    <marker id="am" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ff2bd6"/></marker>
+    <marker id="ay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f3ff4a"/></marker>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <pattern id="g" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" class="grid" fill="none"/></pattern>
+  </defs>
+
+  <rect class="bg" width="1280" height="860"/>
+  <rect width="1280" height="860" fill="url(#g)"/>
+  <text x="40" y="54" class="title">HOW NEONWATCH FITS TOGETHER</text>
+  <text x="40" y="80" class="sub">Who runs as what, what talks to what, and what each connection carries. Everything is on loopback by default.</text>
+
+  <!-- this machine -->
+  <rect x="40" y="120" width="230" height="300" rx="4" class="box"/>
+  <text x="58" y="150" class="h">This machine</text>
+  <text x="58" y="180" class="m">/proc  /sys</text>
+  <text x="58" y="204" class="m">sensors -j</text>
+  <text x="58" y="228" class="m">smartctl  nvidia-smi</text>
+  <text x="58" y="252" class="m">ps  ss  df  nft</text>
+  <text x="58" y="276" class="m">systemctl  journalctl</text>
+  <text x="58" y="300" class="m">crontabs  authorized_keys</text>
+  <text x="58" y="324" class="m">docker.sock (GET)</text>
+  <text x="58" y="360" class="s">14 commands, each an</text>
+  <text x="58" y="380" class="s">exact, reviewed argv;</text>
+  <text x="58" y="400" class="s">2 of them as nobody</text>
+
+  <!-- root zone -->
+  <rect x="320" y="110" width="290" height="320" rx="4" class="zone root" filter="url(#glow)"/>
+  <text x="338" y="138" class="zone-label" fill="#ff3864">ROOT · READ-ONLY</text>
+  <rect x="340" y="160" width="250" height="250" rx="4" class="box"/>
+  <text x="358" y="190" class="h">neonwatch agent</text>
+  <text x="358" y="212" class="m">sudo scripts/neonwatch-agent</text>
+  <text x="358" y="246" class="lbl">· 49 probes on fixed cadences</text>
+  <text x="358" y="270" class="lbl">· files opened read-only</text>
+  <text x="358" y="294" class="lbl">· no shell, empty environment</text>
+  <text x="358" y="318" class="lbl">· redacts before anything leaves</text>
+  <text x="358" y="342" class="lbl">· writes nothing; logs to stderr</text>
+  <text x="358" y="366" class="lbl">· no model client at all</text>
+  <text x="358" y="394" class="lbl-m">checked by tools/gates.py</text>
+
+  <path d="M270 270 H334" class="flow" marker-end="url(#ac)"/>
+  <rect x="268" y="232" width="70" height="22" rx="3" class="pill"/>
+  <text x="275" y="248" class="lbl-m">reads</text>
+
+  <!-- user zone -->
+  <rect x="660" y="110" width="580" height="420" rx="4" class="zone user" filter="url(#glow)"/>
+  <text x="678" y="138" class="zone-label" fill="#00f0ff">YOUR USER · UNPRIVILEGED</text>
+
+  <rect x="680" y="160" width="250" height="110" rx="4" class="box"/>
+  <text x="698" y="190" class="h">neonwatch broker</text>
+  <text x="698" y="212" class="m">NATS JetStream</text>
+  <text x="698" y="234" class="m">127.0.0.1:4222</text>
+  <text x="698" y="256" class="s">one credential per role</text>
+
+  <rect x="970" y="160" width="250" height="250" rx="4" class="box-hot"/>
+  <text x="988" y="190" class="h">neonwatch service</text>
+  <text x="988" y="222" class="lbl">· deterministic rules</text>
+  <text x="988" y="246" class="lbl">· judge client</text>
+  <text x="988" y="270" class="lbl">· correlator (incidents)</text>
+  <text x="988" y="294" class="lbl">· notifier (desktop)</text>
+  <text x="988" y="318" class="lbl">· SQLite store</text>
+  <text x="988" y="348" class="s">the only process that</text>
+  <text x="988" y="368" class="s">talks to any model</text>
+  <text x="988" y="394" class="m">~/.local/state/neonwatch</text>
+
+  <rect x="680" y="330" width="250" height="180" rx="4" class="box"/>
+  <text x="698" y="360" class="h">dashboard + agent API</text>
+  <text x="698" y="382" class="m">127.0.0.1:8765</text>
+  <text x="698" y="412" class="lbl">· Attention, Scheduled,</text>
+  <text x="698" y="434" class="lbl">  Services, Logs, Board</text>
+  <text x="698" y="458" class="lbl">· /api/agent/v1 and MCP</text>
+  <text x="698" y="490" class="s">LAN only with TLS + password</text>
+
+  <!-- agent -> broker -->
+  <path d="M590 215 H674" class="flow-r" marker-end="url(#am)"/>
+  <rect x="598" y="168" width="70" height="40" rx="3" class="pill"/>
+  <text x="606" y="185" class="lbl-m">publish</text>
+  <text x="606" y="201" class="lbl-m">only</text>
+  <!-- broker -> service -->
+  <path d="M930 200 H964" class="flow" marker-end="url(#ac)"/>
+  <path d="M964 240 H936" class="flow" marker-end="url(#ac)"/>
+  <!-- service -> dashboard -->
+  <path d="M970 380 H936" class="flow" marker-end="url(#ac)"/>
+
+  <!-- models zone -->
+  <rect x="660" y="580" width="580" height="200" rx="4" class="zone models"/>
+  <text x="678" y="608" class="zone-label" fill="#f3ff4a">OPTIONAL MODELS</text>
+  <rect x="680" y="626" width="260" height="134" rx="4" class="box"/>
+  <text x="698" y="654" class="h">judge, named by you</text>
+  <text x="698" y="676" class="my">[judge] name · url · model</text>
+  <text x="698" y="702" class="lbl">· loopback only</text>
+  <text x="698" y="724" class="lbl">· answers typed questions:</text>
+  <text x="698" y="746" class="lbl">  probability, choice, scale</text>
+  <rect x="960" y="626" width="260" height="134" rx="4" class="box"/>
+  <text x="978" y="654" class="h">analyst LLM</text>
+  <text x="978" y="676" class="my">[analyst] reach</text>
+  <text x="978" y="702" class="lbl">· local, LAN or remote</text>
+  <text x="978" y="724" class="lbl">· only after you confirm</text>
+  <text x="978" y="746" class="lbl">  what is sent, and where</text>
+
+  <path d="M1030 410 V560 H950 V680 H946" class="flow" marker-end="url(#ac)"/>
+  <rect x="760" y="537" width="152" height="38" rx="3" class="pill"/>
+  <text x="768" y="552" class="lbl-m">redacted typed</text>
+  <text x="768" y="568" class="lbl-m">questions</text>
+  <path d="M1150 410 V620" class="flow-y" marker-end="url(#ay)"/>
+  <rect x="1158" y="470" width="80" height="22" rx="3" class="pill"/>
+  <text x="1164" y="486" class="lbl-m">on request</text>
+
+  <!-- consumers -->
+  <rect x="320" y="470" width="290" height="60" rx="4" class="box"/>
+  <text x="338" y="497" class="h">your browser</text>
+  <text x="338" y="518" class="s">per-launch token in the URL</text>
+  <rect x="320" y="550" width="290" height="60" rx="4" class="box"/>
+  <text x="338" y="577" class="h">local AI agents</text>
+  <text x="338" y="598" class="s">agent token; rate-limited, audited</text>
+  <path d="M680 470 H616" class="flow" marker-end="url(#ac)"/>
+  <path d="M680 490 Q650 490 650 560 Q650 580 616 580" class="flow" marker-end="url(#ac)"/>
+
+  <!-- annotations -->
+  <circle cx="300" cy="150" r="13" class="num"/><text x="295" y="155" class="num-t">1</text>
+  <circle cx="632" cy="150" r="13" class="num"/><text x="627" y="155" class="num-t">2</text>
+  <circle cx="1226" cy="148" r="13" class="num"/><text x="1221" y="153" class="num-t">3</text>
+  <circle cx="926" cy="560" r="13" class="num"/><text x="921" y="565" class="num-t">4</text>
+
+  <g transform="translate(40 645)">
+    <text x="0" y="0" class="h">Read the arrows</text>
+    <circle cx="12" cy="30" r="11" class="num"/><text x="8" y="35" class="num-t">1</text>
+    <text x="32" y="35" class="note">The agent reads the machine; nothing else flows into root</text>
+    <text x="32" y="55" class="lbl-m">except your config file and its broker credential.</text>
+    <circle cx="12" cy="82" r="11" class="num"/><text x="8" y="87" class="num-t">2</text>
+    <text x="32" y="87" class="note">It publishes and receives only acknowledgements:</text>
+    <text x="32" y="107" class="lbl-m">nothing downstream can ask it to act.</text>
+    <circle cx="12" cy="134" r="11" class="num"/><text x="8" y="139" class="num-t">3</text>
+    <text x="32" y="139" class="note">Only the service, running as you, talks to a model.</text>
+    <circle cx="12" cy="166" r="11" class="num"/><text x="8" y="171" class="num-t">4</text>
+    <text x="32" y="171" class="note">A judgement can raise or rank an issue, never clear one.</text>
+  </g>
+</svg>

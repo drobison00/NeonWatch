@@ -1,0 +1,181 @@
+# A generic ATX board (244 x 305 mm), top down, in mm from the top-left corner. Positions are
+# typical, not any one board's: copy this file and edit it to match yours (docs/board-layouts.md).
+name = "Generic ATX"
+width = 244
+height = 305
+caption = "Generic ATX layout: positions are typical, not this board's. Set web.board to your own layout."
+holes = [[6, 6], [6, 299], [238, 6], [238, 299], [130, 6], [130, 299], [238, 150]]
+traces = ["M98 92 V112", "M108 92 V112 H150", "M150 80 H158", "M194 228 V258 H232",
+          "M168 198 H128", "M168 208 H128"]
+
+[socket]
+x = 74
+y = 44
+w = 44
+h = 44
+
+[[part]]
+kind = "io"
+x = 0
+y = 8
+w = 34
+h = 150
+label = "rear I/O"
+
+[[part]]
+kind = "vrm"
+x = 38
+y = 30
+w = 20
+h = 76
+label = "VRM"
+no_sensor = "VRM temperatures need the board's Super I/O driver (for example nct6775 or it87)."
+
+[[part]]
+kind = "vrm"
+x = 60
+y = 10
+w = 82
+h = 18
+label = "VRM"
+no_sensor = "VRM temperatures need the board's Super I/O driver (for example nct6775 or it87)."
+
+[[part]]
+kind = "conn"
+x = 8
+y = 0
+w = 26
+h = 7
+label = "CPU power"
+
+[[part]]
+kind = "conn"
+x = 232
+y = 72
+w = 10
+h = 52
+label = "ATX 24-pin"
+
+[[part]]
+kind = "conn"
+x = 232
+y = 196
+w = 10
+h = 56
+label = "SATA"
+
+[[part]]
+kind = "audio"
+x = 4
+y = 256
+w = 40
+h = 44
+label = "audio"
+
+[[part]]
+kind = "chipset"
+x = 168
+y = 168
+w = 52
+h = 60
+label = "chipset"
+no_sensor = "Few boards report a chipset temperature to Linux."
+
+[[part]]
+kind = "dimm"
+x = 160
+y = 20
+w = 5
+h = 132
+label = "DIMM"
+label_at = [174, 17]
+no_sensor = "Memory without a temperature sensor driver reports nothing."
+
+[[part]]
+kind = "dimm"
+x = 169
+y = 20
+w = 5
+h = 132
+no_sensor = "Memory without a temperature sensor driver reports nothing."
+
+[[part]]
+kind = "dimm"
+x = 178
+y = 20
+w = 5
+h = 132
+no_sensor = "Memory without a temperature sensor driver reports nothing."
+
+[[part]]
+kind = "dimm"
+x = 187
+y = 20
+w = 5
+h = 132
+no_sensor = "Memory without a temperature sensor driver reports nothing."
+
+# M.2 slots: the drive's footprint. `attach` is where its lanes come from.
+[[slot]]
+name = "M2_1"
+kind = "m2"
+attach = "cpu"
+x = 46
+y = 111
+w = 80
+h = 11
+
+[[slot]]
+name = "M2_2"
+kind = "m2"
+attach = "chipset"
+x = 46
+y = 158
+w = 80
+h = 11
+
+[[slot]]
+name = "M2_3"
+kind = "m2"
+attach = "chipset"
+x = 46
+y = 219
+w = 80
+h = 11
+
+# PCIe slots: the slot strip. `lanes` is the electrical width.
+[[slot]]
+name = "PCIE1"
+kind = "pcie"
+lanes = 16
+x = 34
+y = 133
+w = 89
+h = 6
+
+[[slot]]
+name = "PCIE2"
+kind = "pcie"
+lanes = 1
+x = 70
+y = 173.6
+w = 26
+h = 6
+
+[[slot]]
+name = "PCIE3"
+kind = "pcie"
+lanes = 4
+x = 34
+y = 194
+w = 89
+h = 6
+
+[[slot]]
+name = "PCIE4"
+kind = "pcie"
+lanes = 1
+x = 70
+y = 240
+w = 26
+h = 6

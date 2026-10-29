@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 900" width="1280" height="900" role="img" aria-labelledby="t d">
+  <title id="t">One judge pass, and the settings that shape it</title>
+  <desc id="d">At each collation the service builds contexts from what changed, picks each context's questions whose evidence it carries, keeps within a budget of about 540 questions, packs them into requests no larger than max_questions_per_request and max_state_chars, sends up to concurrency requests at once to the judge's loopback url with timeout_s each, validates every answer and re-asks warnings with the options reversed, and records each answer as an attestation under the judge's name, with its evidence when it can raise or rank an issue.</desc>
+  <defs>
+    <style>
+      .bg { fill: #06050b; }
+      .grid { stroke: #141126; stroke-width: 1; }
+      .box { fill: #141126; stroke: #3a3062; stroke-width: 1.5; }
+      .box-c { fill: #141126; stroke: #00f0ff; stroke-width: 1.8; }
+      .box-y { fill: #141126; stroke: #f3ff4a; stroke-width: 1.8; }
+      .title { font: 700 26px "Orbitron", "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; letter-spacing: 4px; }
+      .sub { font: 15px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .n { font: 700 30px "Orbitron", "DejaVu Sans", sans-serif; fill: #ff2bd6; }
+      .h { font: 700 17px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .t { font: 14px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .s { font: 13.5px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .key { fill: #06050b; stroke: #00f0ff; stroke-width: 1; }
+      .key-t { font: 13px "DejaVu Sans Mono", "Share Tech Mono", Consolas, monospace; fill: #00f0ff; }
+      .fix { fill: #06050b; stroke: #3a3062; stroke-width: 1; }
+      .fix-t { font: 13px "DejaVu Sans Mono", Consolas, monospace; fill: #8f88b3; }
+      .flow { stroke: #00f0ff; stroke-width: 2.4; fill: none; }
+      .warn-h { font: 700 15px "DejaVu Sans", "Segoe UI", sans-serif; fill: #f3ff4a; }
+    </style>
+    <pattern id="g" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" class="grid" fill="none"/></pattern>
+    <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#00f0ff"/></marker>
+  </defs>
+  <rect class="bg" width="1280" height="900"/>
+  <rect width="1280" height="900" fill="url(#g)"/>
+  <text x="40" y="54" class="title">ONE JUDGE PASS</text>
+  <text x="40" y="80" class="sub">Every collation, in this order. Cyan tags are settings you can change (docs/configuration.md); grey ones are fixed in the code.</text>
+
+  <!-- row 1 -->
+  <rect x="40" y="112" width="280" height="300" rx="4" class="box"/>
+  <text x="58" y="150" class="n">1</text><text x="88" y="148" class="h">Build contexts</text>
+  <text x="58" y="180" class="t">One per domain, and one per</text>
+  <text x="58" y="200" class="t">thing worth a look: a hot or</text>
+  <text x="58" y="220" class="t">tmp process, a failing unit,</text>
+  <text x="58" y="240" class="t">a new listener, a log burst.</text>
+  <text x="58" y="270" class="s">Unchanged ones are re-asked</text>
+  <text x="58" y="290" class="s">only every 6th collation.</text>
+  <rect x="58" y="320" width="164" height="26" rx="3" class="key"/><text x="68" y="338" class="key-t">cadence.collate</text>
+  <rect x="58" y="354" width="196" height="26" rx="3" class="fix"/><text x="68" y="372" class="fix-t">REFRESH_EVERY = 6</text>
+
+  <rect x="350" y="112" width="280" height="300" rx="4" class="box"/>
+  <text x="368" y="150" class="n">2</text><text x="398" y="148" class="h">Pick questions</text>
+  <text x="368" y="180" class="t">Each context's bank, minus</text>
+  <text x="368" y="200" class="t">every question whose evidence</text>
+  <text x="368" y="220" class="t">(its needs) the state lacks.</text>
+  <text x="368" y="250" class="s">Asked without its evidence, a</text>
+  <text x="368" y="270" class="s">question is answered by guess,</text>
+  <text x="368" y="290" class="s">so it is not asked at all.</text>
+  <rect x="368" y="354" width="196" height="26" rx="3" class="fix"/><text x="378" y="372" class="fix-t">questions/bank.py</text>
+
+  <rect x="660" y="112" width="280" height="300" rx="4" class="box"/>
+  <text x="678" y="150" class="n">3</text><text x="708" y="148" class="h">Keep to a budget</text>
+  <text x="678" y="180" class="t">About 540 questions a pass:</text>
+  <text x="678" y="200" class="t">45 s at ~12 a second. Rule-</text>
+  <text x="678" y="220" class="t">touched contexts go first.</text>
+  <text x="678" y="250" class="s">What does not fit waits for the</text>
+  <text x="678" y="270" class="s">next collation. Scheduled jobs</text>
+  <text x="678" y="290" class="s">get at most a third.</text>
+  <rect x="678" y="354" width="232" height="26" rx="3" class="fix"/><text x="688" y="372" class="fix-t">PASS_S · QUESTIONS_PER_S</text>
+
+  <rect x="970" y="112" width="270" height="300" rx="4" class="box"/>
+  <text x="988" y="150" class="n">4</text><text x="1018" y="148" class="h">Pack requests</text>
+  <text x="988" y="180" class="t">Questions fill a request, in</text>
+  <text x="988" y="200" class="t">bank order, up to both limits.</text>
+  <text x="988" y="230" class="s">A state too big for one request</text>
+  <text x="988" y="250" class="s">is cut, and the request says so:</text>
+  <text x="988" y="270" class="s">"…[truncated by neonwatch: N</text>
+  <text x="988" y="290" class="s">characters cut to M]".</text>
+  <rect x="988" y="320" width="234" height="26" rx="3" class="key"/><text x="998" y="338" class="key-t">max_questions_per_request</text>
+  <rect x="988" y="354" width="150" height="26" rx="3" class="key"/><text x="998" y="372" class="key-t">max_state_chars</text>
+
+  <path d="M320 262 H344" class="flow" marker-end="url(#ac)"/>
+  <path d="M630 262 H654" class="flow" marker-end="url(#ac)"/>
+  <path d="M940 262 H964" class="flow" marker-end="url(#ac)"/>
+  <path d="M1105 412 V440 H180 V468" class="flow" marker-end="url(#ac)"/>
+
+  <!-- row 2 -->
+  <rect x="40" y="476" width="380" height="300" rx="4" class="box-c"/>
+  <text x="58" y="514" class="n">5</text><text x="88" y="512" class="h">Send to the judge</text>
+  <text x="58" y="544" class="t">POST to the judge's url, plain http on</text>
+  <text x="58" y="564" class="t">loopback; proxies and redirects are</text>
+  <text x="58" y="584" class="t">ignored. Up to concurrency at once.</text>
+  <text x="58" y="614" class="s">A server that answers one request at a time</text>
+  <text x="58" y="634" class="s">gains nothing beyond 2: pack, don't fan out.</text>
+  <rect x="58" y="660" width="44" height="26" rx="3" class="key"/><text x="68" y="678" class="key-t">url</text>
+  <rect x="110" y="660" width="64" height="26" rx="3" class="key"/><text x="120" y="678" class="key-t">model</text>
+  <rect x="182" y="660" width="114" height="26" rx="3" class="key"/><text x="192" y="678" class="key-t">concurrency</text>
+  <rect x="304" y="660" width="94" height="26" rx="3" class="key"/><text x="314" y="678" class="key-t">timeout_s</text>
+  <text x="58" y="718" class="s">A request that fails or times out yields no</text>
+  <text x="58" y="738" class="s">answers, never a guess. The vital counts it.</text>
+
+  <rect x="450" y="476" width="380" height="300" rx="4" class="box"/>
+  <text x="468" y="514" class="n">6</text><text x="498" y="512" class="h">Check every answer</text>
+  <text x="468" y="544" class="t">Each answer is held to the question</text>
+  <text x="468" y="564" class="t">asked: the right type, in range, with</text>
+  <text x="468" y="584" class="t">probabilities that sum to 1.</text>
+  <text x="468" y="614" class="t">A key question answered at WARN or</text>
+  <text x="468" y="634" class="t">above is asked again with its options</text>
+  <text x="468" y="654" class="t">reversed. If it flips, it is unstable</text>
+  <text x="468" y="674" class="t">and cannot open an issue on its own.</text>
+  <text x="468" y="718" class="s">A malformed answer is refused and counted,</text>
+  <text x="468" y="738" class="s">never repaired.</text>
+
+  <rect x="860" y="476" width="380" height="300" rx="4" class="box-y"/>
+  <text x="878" y="514" class="n">7</text><text x="908" y="512" class="h">Record and rank</text>
+  <text x="878" y="544" class="t">Each answer becomes an attestation:</text>
+  <text x="878" y="564" class="t">its severity, cause and next check,</text>
+  <text x="878" y="584" class="t">under the judge's name. One that can</text>
+  <text x="878" y="604" class="t">raise or rank an issue also keeps the</text>
+  <text x="878" y="624" class="t">evidence it was asked over.</text>
+  <text x="878" y="654" class="s">It can raise an issue, rank one higher</text>
+  <text x="878" y="674" class="s">or name a likely cause. It never clears</text>
+  <text x="878" y="694" class="s">or lowers what a rule raised.</text>
+  <rect x="878" y="720" width="104" height="26" rx="3" class="key"/><text x="888" y="738" class="key-t">judge.name</text>
+
+  <path d="M420 626 H444" class="flow" marker-end="url(#ac)"/>
+  <path d="M830 626 H854" class="flow" marker-end="url(#ac)"/>
+
+  <text x="40" y="826" class="warn-h">How long a pass takes</text>
+  <text x="40" y="850" class="s">Measured on one server answering serially at ~80 ms a question: a pass of about 20 contexts takes 20 to 25 seconds, plus re-asks.</text>
+  <text x="40" y="872" class="s">The judge vital in the top bar shows p50 and p95 latency, requests, failures and refused answers.</text>
+</svg>

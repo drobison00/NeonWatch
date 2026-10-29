@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 900" width="1280" height="900" role="img" aria-labelledby="t d">
+  <title id="t">How far the analyst may reach, and what it is sent</title>
+  <desc id="d">analyst.reach sets how far a request may go: local allows loopback only, lan also allows private and link-local IP addresses, remote allows any host. Plain http is allowed to loopback, and to a LAN address only without a key; everything else needs https. The key is read from the environment variable named by api_key_env when the service starts and is never stored. From the dashboard, a request is sent only after you confirm an estimate of its destination, whether it leaves the machine, its size and its number of requests; the answer is plain text, shown as advice. Local AI agents using the agent API skip that confirmation.</desc>
+  <defs>
+    <style>
+      .bg { fill: #06050b; }
+      .grid { stroke: #141126; stroke-width: 1; }
+      .title { font: 700 26px "Orbitron", "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; letter-spacing: 4px; }
+      .sub { font: 15px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .ring { fill: none; stroke-width: 2; }
+      .zone-t { font: 700 15px "Orbitron", "DejaVu Sans", sans-serif; letter-spacing: 2.5px; }
+      .h { font: 700 16px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .t { font: 14px "DejaVu Sans", "Segoe UI", sans-serif; fill: #e8e3ff; }
+      .s { font: 13.5px "DejaVu Sans", "Segoe UI", sans-serif; fill: #8f88b3; }
+      .m { font: 13px "DejaVu Sans Mono", "Share Tech Mono", Consolas, monospace; fill: #00f0ff; }
+      .my { font: 13px "DejaVu Sans Mono", "Share Tech Mono", Consolas, monospace; fill: #f3ff4a; }
+      .box { fill: #141126; stroke: #3a3062; stroke-width: 1.5; }
+      .step { fill: #141126; stroke: #f3ff4a; stroke-width: 1.5; }
+      .n { font: 700 22px "Orbitron", "DejaVu Sans", sans-serif; fill: #ff2bd6; }
+      .flow { stroke: #f3ff4a; stroke-width: 2.2; fill: none; }
+      .warn { fill: #0d0b17; stroke: #ff3864; stroke-width: 1.8; }
+      .warn-h { font: 700 15px "DejaVu Sans", "Segoe UI", sans-serif; fill: #ff3864; }
+    </style>
+    <pattern id="g" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" class="grid" fill="none"/></pattern>
+    <marker id="ay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f3ff4a"/></marker>
+  </defs>
+  <rect class="bg" width="1280" height="900"/>
+  <rect width="1280" height="900" fill="url(#g)"/>
+  <text x="40" y="54" class="title">THE ANALYST: REACH AND CONSENT</text>
+  <text x="40" y="80" class="sub">analyst.reach bounds where a request may go; the estimate-and-confirm step decides whether it goes at all.</text>
+
+  <!-- reach zones -->
+  <rect x="40" y="110" width="600" height="600" rx="6" class="ring" stroke="#ff2bd6" fill="#0d0b17"/>
+  <text x="62" y="140" class="zone-t" fill="#ff2bd6">REMOTE</text>
+  <text x="62" y="162" class="s">any host, https only · e.g. a hosted API</text>
+  <text x="62" y="184" class="m">reach = "remote"</text>
+
+  <rect x="80" y="210" width="520" height="460" rx="6" class="ring" stroke="#f3ff4a" fill="#100e1d"/>
+  <text x="102" y="240" class="zone-t" fill="#f3ff4a">LAN</text>
+  <text x="102" y="262" class="s">private or link-local IP addresses (never a name)</text>
+  <text x="102" y="282" class="s">http only without a key; https with one</text>
+  <text x="102" y="304" class="m">reach = "lan"</text>
+
+  <rect x="120" y="330" width="440" height="280" rx="6" class="ring" stroke="#00f0ff" fill="#141126"/>
+  <text x="142" y="360" class="zone-t" fill="#00f0ff">LOCAL · THE DEFAULT</text>
+  <text x="142" y="382" class="s">loopback only: nothing leaves the machine</text>
+  <text x="142" y="404" class="m">reach = "local"</text>
+  <text x="142" y="440" class="h">Examples</text>
+  <text x="142" y="466" class="t">A local vLLM or llama.cpp server:</text>
+  <text x="142" y="486" class="my">base_url = "http://127.0.0.1:8000/v1"</text>
+  <text x="142" y="514" class="t">Ollama:</text>
+  <text x="142" y="534" class="my">base_url = "http://127.0.0.1:11434/v1"</text>
+  <text x="142" y="566" class="s">Both with provider = "openai-compatible";</text>
+  <text x="142" y="586" class="s">NeonWatch posts to {base_url}/chat/completions.</text>
+
+  <text x="102" y="634" class="s">A GPU box on your network, keyless:</text>
+  <text x="102" y="654" class="my">base_url = "http://192.168.1.40:8000/v1"</text>
+  <text x="62" y="694" class="s">Anthropic: provider = "anthropic", base_url empty, reach = "remote", and a key.</text>
+
+  <!-- key handling -->
+  <rect x="40" y="730" width="600" height="146" rx="4" class="box"/>
+  <text x="58" y="758" class="h">The key never enters the config</text>
+  <text x="58" y="784" class="t">api_key_env names an environment variable, such as</text>
+  <text x="58" y="804" class="my">api_key_env = "ANTHROPIC_API_KEY"</text>
+  <text x="58" y="830" class="t">The service reads it when it starts. Unset, the analyst</text>
+  <text x="58" y="850" class="t">is simply off. The key is never stored or logged.</text>
+
+  <!-- consent flow -->
+  <text x="690" y="132" class="h">From the dashboard, every time</text>
+  <rect x="690" y="150" width="550" height="76" rx="4" class="step"/>
+  <text x="708" y="182" class="n">1</text>
+  <text x="740" y="180" class="t">You pick issues, a time window, log lines or services,</text>
+  <text x="740" y="202" class="t">and may add a question.</text>
+
+  <rect x="690" y="246" width="550" height="120" rx="4" class="step"/>
+  <text x="708" y="278" class="n">2</text>
+  <text x="740" y="276" class="t">NeonWatch shows an estimate, before anything is sent:</text>
+  <text x="740" y="300" class="s">· the destination host, and whether it leaves this machine</text>
+  <text x="740" y="320" class="s">· characters to send (each request at most max_input_chars)</text>
+  <text x="740" y="340" class="s">· how many requests</text>
+
+  <rect x="690" y="386" width="550" height="76" rx="4" class="step"/>
+  <text x="708" y="418" class="n">3</text>
+  <text x="740" y="416" class="t">You press Send. The requests go as estimated,</text>
+  <text x="740" y="438" class="t">redacted again, each with a timeout of timeout_s.</text>
+
+  <rect x="690" y="482" width="550" height="96" rx="4" class="step"/>
+  <text x="708" y="514" class="n">4</text>
+  <text x="740" y="512" class="t">The answer comes back as plain text, up to</text>
+  <text x="740" y="534" class="t">max_output_tokens, labelled LLM · ADVISORY. Its</text>
+  <text x="740" y="556" class="t">suggested checks are for you to copy, never run.</text>
+
+  <path d="M965 226 V240" class="flow" marker-end="url(#ay)"/>
+  <path d="M965 366 V380" class="flow" marker-end="url(#ay)"/>
+  <path d="M965 462 V476" class="flow" marker-end="url(#ay)"/>
+
+  <rect x="690" y="606" width="550" height="96" rx="4" class="warn"/>
+  <text x="708" y="634" class="warn-h">Local AI agents skip steps 2 and 3</text>
+  <text x="708" y="658" class="t">Anything holding the agent token can start analyst jobs</text>
+  <text x="708" y="680" class="t">directly. Each is rate-limited and audited.</text>
+
+  <rect x="690" y="722" width="550" height="154" rx="4" class="box"/>
+  <text x="708" y="750" class="h">Reasoning models</text>
+  <text x="708" y="776" class="t">A reasoning model left at its own default can spend the</text>
+  <text x="708" y="796" class="t">whole token budget thinking. Set, for openai-compatible:</text>
+  <text x="708" y="822" class="my">reasoning_effort = "low"</text>
+</svg>
