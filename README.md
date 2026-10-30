@@ -173,7 +173,13 @@ creates the stream the agent publishes to.
 
 Open the URL the service printed. It carries a token that changes every time the service starts.
 After the first visit the token lives in a cookie. To look from another machine, an SSH tunnel
-(`ssh -L 8765:127.0.0.1:8765 <this host>`) is simpler and safer than LAN mode.
+(`ssh -L 8765:127.0.0.1:8765 <this host>`) is simpler and safer than LAN mode. The same URL is
+in `~/.local/state/neonwatch/dashboard.url` (readable by you alone) while the service runs.
+
+Views and issues have addresses, so a link can open one: `#/view/attention`, `scheduled`,
+`services`, `logs` or `board`, and `#/issues/<id>`, which scrolls to that issue's card and marks
+it. An issue that is no longer open says what became of it in the status line. Back and forward
+move between them.
 
 ### 3. What a healthy first run looks like
 
@@ -204,37 +210,149 @@ the services, remove them first (below).
 
 ### Run as services
 
-Instead of three terminals: the agent as a hardened system unit, `neonwatch-agent@<you>`, and the
-broker and service as `systemctl --user` units. `tools/services.py` installs all three and uses
-only the standard library, so root runs nothing but that file and the system Python.
+The three terminals above are fine for trying it out. To keep NeonWatch running, install it as
+three systemd units. They start at boot and restart after a failure.
+
+| Unit | Runs | As | Installed by |
+| --- | --- | --- | --- |
+| `neonwatch-agent@<you>.service` | the root agent, from a root-owned copy in `/opt/neonwatch`, in a read-only sandbox | root | `scripts/install-agent` |
+| `neonwatch-broker.service` | the NATS broker, from your clone | you (`systemctl --user`) | `tools/services.py install-user` |
+| `neonwatch-service.service` | the evaluator, judge client and dashboard, from your clone | you (`systemctl --user`) | `tools/services.py install-user` |
+
+Run every step from the clone the units should run. Nothing here needs the three hand-started
+processes, so stop them first: Ctrl-C in each terminal, the agent first.
+
+**1. The agent, as a system unit.** As yourself; it asks sudo for the one step that needs root:
 
 ```sh
-uv run python tools/services.py bundle             # as you: the two wheels, into dist/agent
-sudo /usr/bin/python3 -I tools/services.py install-agent --operator "$USER"
-python3 tools/services.py install-user             # as you, from the clone the units will run
-sudo loginctl enable-linger "$USER"                # keep them running when you are logged out
+scripts/install-agent
 ```
 
-Each install enables its units but starts nothing that is not already running, so a hand-started
-copy is never doubled. Stop those, then `systemctl --user start neonwatch-service` (it starts the
-broker too) and `sudo systemctl start neonwatch-agent@$USER`. The service's URL is in its journal:
-`journalctl --user -u neonwatch-service | grep -o 'http://127.0.0.1:8765/[^ ]*' | tail -1`.
+It builds the two wheels into `dist/agent` as you, then asks sudo to run
+`tools/services.py install-agent --operator <you>` on the system Python, isolated. That copies
+the bundle somewhere only root can write and checks every hash. It builds `/opt/neonwatch.new`,
+imports the agent from it, and refuses unless every file is root's and writable by nobody else.
+Then it swaps the copy into `/opt/neonwatch` (the previous one becomes `/opt/neonwatch.old`) and
+writes and enables the unit. The script starts the unit if it isn't running, and shows its status.
+You should see `active (running)` and the agent's first line:
+`observing for <you> (uid <n>): 49 probes, …`.
 
-`install-agent` copies the bundle somewhere only root can write and checks every hash before it
-builds anything. It builds a venv in `/opt/neonwatch.new` and imports the agent from it, and
-refuses unless every file is root's and writable by nobody else. Only then does it swap the new
-copy into `/opt/neonwatch`, keeping the previous one as `/opt/neonwatch.old`. Re-run `bundle` and
-`install-agent` to upgrade the agent; a running unit is restarted onto the new copy.
-
-The agent's interpreter is the system's `/usr/bin/python3`, which must be root's and 3.12 or
-3.13 (what `pyproject.toml` requires); `install-agent` refuses one that is not root's.
-
-To remove them:
+**2. The broker and the service, as user units.** As yourself:
 
 ```sh
-sudo /usr/bin/python3 -I tools/services.py uninstall-agent    # the unit and /opt/neonwatch
-python3 tools/services.py uninstall-user
+python3 tools/services.py install-user
+systemctl --user start neonwatch-service       # starts the broker too
+systemctl --user status neonwatch-broker neonwatch-service --no-pager
 ```
+
+`install-user` writes both units into `~/.config/systemd/user/`, pointing at this clone, and
+enables them. It refuses unless the clone has `.venv/bin/neonwatch` and `.tools/nats-server`
+(`uv sync` and `scripts/fetch-nats-server`). It starts nothing, so a hand-started broker or service
+is never doubled. Both units should be `active (running)`.
+
+**3. Keep them running when you are logged out.** Without this, user units stop at logout and
+start only at login:
+
+```sh
+sudo loginctl enable-linger "$USER"
+loginctl show-user "$USER" -p Linger           # Linger=yes
+```
+
+**4. Open the dashboard.** The service writes its URL, with the per-launch token, beside the store
+while it runs:
+
+```sh
+cat ~/.local/state/neonwatch/dashboard.url
+```
+
+Or let the [desktop app](#the-desktop-app) sign in for you.
+
+**Checking on them:**
+
+```sh
+systemctl status neonwatch-agent@$USER --no-pager                 # the agent
+journalctl -u neonwatch-agent@$USER -f                            # its log
+systemctl --user status neonwatch-broker neonwatch-service --no-pager
+journalctl --user -u neonwatch-service -f                         # the service's log
+```
+
+The dashboard's status line should show the filesystem as **confined**: the agent's write canary
+finds nothing writable in the sandbox. As a unit, the agent refuses to start if it does.
+
+**Upgrading:** update the clone (`git pull`, `uv sync`), then:
+
+```sh
+systemctl --user restart neonwatch-service     # the service picks up the new code
+scripts/install-agent                          # only when the agent's own code changed
+```
+
+**Removing them:**
+
+```sh
+scripts/uninstall-agent                  # as you: asks sudo to remove the unit and /opt/neonwatch
+python3 tools/services.py uninstall-user # stops, disables and removes the two user units
+sudo loginctl disable-linger "$USER"     # if nothing else of yours needs linger
+```
+
+Your config and state in `~/.config/neonwatch` and `~/.local/state/neonwatch` stay as they are.
+
+## The desktop app
+
+The dashboard in its own window, desktop notifications that open it at their issue, and a tray
+icon showing the state at a glance. It sits beside the browser dashboard, not instead of it. The
+window shows the service's own page, so everything works there as it does in a browser.
+
+![The NeonWatch app window: the dashboard under a neon title bar that carries the open counts](docs/images/desktop-window.png)
+
+**The window.** The title bar carries the open counts. Closing the window hides it to the tray.
+The app signs in by itself from the service's `dashboard.url`, and again whenever the service
+restarts with a new token, staying on the same view or issue.
+
+**The tray icon** is the eye, in the dashboard's severity colours:
+
+![The eye in the panel's system tray](docs/images/desktop-tray-panel.png)
+
+![The six tray states: green quiet, cyan watch, yellow warn, red critical, grey stale, grey and struck through when down](docs/images/desktop-tray-states.png)
+
+- **Precedence:** a critical issue outranks a silent agent, which outranks warn and watch. With
+  nothing being watched, a quiet green eye would claim something nobody can know.
+- **The tooltip** gives the counts and how recent the agent's heartbeat is.
+- **The menu** has:
+  - **Open NeonWatch**;
+  - **Pause notifications for 1 hour**, which then reads "Resume notifications (paused, N min left)";
+  - **Quit NeonWatch**, the only thing that ends the app.
+
+**Notifications** open the app at their issue:
+
+![A NeonWatch notification with its Open in NeonWatch button](docs/images/desktop-notification.png)
+
+- **Cinnamon:** press **Open in NeonWatch**. Clicking a notification's body only dismisses it there.
+- **GNOME and KDE:** a click on the body works as well.
+
+**When the service is not running,** the window says so and offers to start it:
+
+![The app when the service is not running: Retry and Start the service](docs/images/desktop-service-down.png)
+
+**Build and run** (Rust and the WebKitGTK headers):
+
+```sh
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+cd desktop && cargo build --release
+target/release/neonwatch-desktop            # or --hidden to start in the tray
+```
+
+> [!NOTE]
+> Two pieces are not built yet:
+> - **The service still sends its own notifications** with `gdbus`, and those cannot be clicked
+>   through. The app's own notifications can, today, from `neonwatch-desktop --notify '<json>'`.
+>   Handing the service's notifications to the app is the next step.
+> - **Installing the app** (a menu entry, `neonwatch://` links and autostart) comes after that.
+
+[`desktop/README.md`](desktop/README.md) has everything else:
+- every command-line form;
+- how the app signs in and follows the service;
+- its security posture: the dashboard gets no IPC, and only the dashboard's own origin loads in the window;
+- its limits.
 
 ## Configure
 
@@ -437,6 +555,7 @@ Find what you were doing, then the start of the message you saw.
 | [`docs/agent-api.md`](docs/agent-api.md) | the agent API and MCP tools |
 | [`docs/design.md`](docs/design.md) | the design, the security model and the decisions behind them |
 | [`docs/probes.md`](docs/probes.md) | what each probe reports |
+| [`desktop/README.md`](desktop/README.md) | the desktop app: building, signing in, notifications, the tray, its security |
 
 ## Development
 

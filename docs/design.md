@@ -302,6 +302,48 @@ How it is built:
   on loopback, pins the dashboard's own certificate over TLS, and turns every failure into an
   `isError` result.
 
+## The desktop app (feature, 2026-10-30)
+
+`desktop/` is a Tauri 2 app on the system WebKitGTK, beside the browser dashboard: the dashboard in
+its own window, notifications that open it at their issue, and a tray icon. Decisions, and the
+measurements behind them (Linux Mint 22, Cinnamon 6.2 on X11, an NVIDIA GPU):
+
+- **The window shows the service's own page.** No second UI, so the layout is the same by
+  construction. WebKitGTK rendered it on the NVIDIA proprietary driver with no workaround
+  (measured), though `WEBKIT_DISABLE_DMABUF_RENDERER=1` is the known fix where it doesn't.
+- **Sign-in without copying a URL.** The service writes its URL, with the per-launch token, to
+  `dashboard.url` beside the store. The file is 0600, staged and renamed, never written through a
+  symlink, and removed when the service stops if it is still the service's own. The app polls it
+  every 5 s and signs in again when the token changes, keeping the address fragment.
+- **Addresses.** `#/view/<name>` and `#/issues/<id>` open a view or an issue's card. They are
+  followed at once, and an issue waits for its card to render. Waiting for every domain request
+  instead took about 7 s on a large store.
+- **No IPC for the dashboard.** No capability names its origin, and tauri is pinned at 2.11.1 or
+  later, so every remote origin goes through ACL resolution. The app's own page (service down,
+  starting) needs none either: its buttons are `neonwatch-action:` links that the navigation
+  handler intercepts. Only the dashboard's exact origin loads; other web addresses open in the
+  browser.
+- **Notifications are clicked through by a process that stays on the bus.** The freedesktop
+  server sends `ActionInvoked` to the sender's connection, so the one-shot `gdbus call` the
+  service uses can never be clicked through. Measured on Cinnamon:
+  - a **button** delivers its action (5.2 s after showing);
+  - a **click on the body** only closes the notification (reason 2), even with a `default` action.
+
+  The app sends both a default action and an "Open in NeonWatch" button.
+- **One instance.** A later launch (`--issue`, `neonwatch://issue/<id>`, `--notify JSON`) hands its
+  arguments to the running one over D-Bus and exits; measured, it exits 0 at once.
+- **The tray** reads `/api/overview` with the token every 15 s. A critical issue outranks a silent
+  agent (heartbeat older than the dashboard's own 180 s), which outranks warn and watch. A quiet
+  icon while nothing is watched would be a claim nobody can make.
+- **The title bar** is a GTK header bar in the dashboard's palette, in place of the window
+  manager's. Window controls drawn inside the page would need IPC, and WebKitGTK has no drag
+  region a page could use without it.
+
+Still to build:
+- **The service hands its notifications to the app** (`--notify`), keeping `gdbus` as the
+  fallback.
+- **An install for the app:** a desktop entry, icons, the `neonwatch://` handler and autostart.
+
 ## Correlation: linking related measures (feature, 2026-09-30)
 
 A second pass after each collation groups findings and issues that are probably one problem, so the
