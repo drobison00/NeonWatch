@@ -3,10 +3,12 @@ __pycache__/
 *.pyc
 *.local.md
 .tools/
-dist/
+/dist/
 .coverage
 .pytest_cache/
 .ruff_cache/
 
 # Local working notes
 PLAN.md
+desktop/target/
+desktop/gen/schemas/

@@ -27,3 +27,21 @@ jobs:
       - run: uv run --frozen ruff check neonwatch/ tools/ scripts/
       - run: uv run --frozen python tools/gates.py
       - run: uv run --frozen pytest -q --cov
+
+  desktop:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      # The runner has rustup; the GTK and WebKitGTK headers Tauri compiles against it has not.
+      - run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - run: rustup component add clippy rustfmt
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked

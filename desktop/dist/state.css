@@ -1,0 +1,12 @@
+:root { color-scheme: dark; --bg: #06050b; --panel: #0d0b17; --line: #3a3062; --text: #e8e3ff;
+  --muted: #8f88b3; --accent: #00f0ff; }
+html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.5 Ubuntu, system-ui, sans-serif; }
+main { min-height: 100%; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 4px; padding: 24px; box-sizing: border-box; text-align: center; }
+h1 { margin: 8px 0 4px; letter-spacing: .3em; font-weight: 600; color: var(--accent); }
+.muted { color: var(--muted); max-width: 46em; }
+code { font-family: "DejaVu Sans Mono", monospace; color: var(--text); }
+.button { display: inline-block; margin: 8px 6px 0; padding: 6px 16px; border: 1px solid var(--accent);
+  color: var(--accent); text-decoration: none; border-radius: 3px; }
+.button:hover, .button:focus-visible { background: rgba(0, 240, 255, .12); outline: none; }

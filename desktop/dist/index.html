@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeonWatch</title>
+<link rel="stylesheet" href="state.css">
+<script src="state.js" defer></script>
+</head>
+<body>
+<main>
+  <img src="icon.svg" alt="" width="96" height="96">
+  <h1>NeonWatch</h1>
+  <p id="message">Connecting to the dashboard…</p>
+  <p id="detail" class="muted"></p>
+  <p id="actions" hidden>
+    <a class="button" href="neonwatch-action://retry" id="retry">Retry</a>
+    <a class="button" href="neonwatch-action://start-service" id="start">Start the service</a>
+  </p>
+  <p id="help" class="muted" hidden>
+    By hand: <code>neonwatch service</code> in your clone. As a user unit:
+    <code>systemctl --user start neonwatch-service</code>.
+  </p>
+</main>
+</body>
+</html>

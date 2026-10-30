@@ -1,0 +1,38 @@
+[package]
+name = "neonwatch-desktop"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "NeonWatch on the desktop: the dashboard in its own window, notifications that open it at their issue, and a tray icon."
+publish = false
+
+[lib]
+name = "neonwatch_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "neonwatch-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# >= 2.11.1: remote origins always go through ACL resolution (and the is_local_url fix).
+tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+notify-rust = "4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Plain HTTP only: the tray reads the loopback dashboard's overview.
+ureq = { version = "2", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The version tauri's own GTK backend uses, for the header bar.
+gtk = "0.18"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true
