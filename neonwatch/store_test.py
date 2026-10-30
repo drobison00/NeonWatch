@@ -652,6 +652,21 @@ def test_prune_by_age_removes_old_rows_but_never_live_issues(tmp_path: Path) -> 
     s.close()
 
 
+def test_a_notification_keeps_the_highest_rank_sent_and_the_latest_time(tmp_path: Path) -> None:
+    path = tmp_path / "store.sqlite3"
+    s = Store(path, config(max_age_s=100))
+    assert s.notified() == {}
+    s.note_notified("i-1", 2, 900.0)
+    s.note_notified("i-1", 1, 950.0)      # a lower rank never lowers what was sent
+    s.note_notified("i-2", 3, 10.0)
+    s.close()
+    s = Store(path, config(max_age_s=100))   # what a restarted service reads
+    assert s.notified() == {"i-1": (2, 950.0), "i-2": (3, 10.0)}
+    s.prune(now=1000)
+    assert s.notified() == {"i-1": (2, 950.0)}
+    s.close()
+
+
 def _fill(s: Store, n: int) -> None:
     for t in range(n):
         s.apply(obs_event("wide", {f"field{k}": float(t) for k in range(50)}, at=1000 + t))

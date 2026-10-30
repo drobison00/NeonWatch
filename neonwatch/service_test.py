@@ -9,6 +9,7 @@ the live broadcaster and the notifier.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import io
 import logging
 import os
@@ -688,6 +689,32 @@ async def test_open_service_builds_the_real_judge_by_default(monkeypatch, tmp_pa
     svc = await service.open_service(web_config(tmp_path), environ={})
     try:
         assert type(svc.judge).__name__ == "Judge"
+    finally:
+        await svc.close()
+
+
+async def test_a_restarted_service_does_not_tell_the_desktop_again(monkeypatch, tmp_path):
+    # 2026-10-30: every restart re-sent every open issue the desktop had already been told of.
+    config = web_config(tmp_path)
+    config = dataclasses.replace(config, notify=dataclasses.replace(config.notify,
+                                                                    min_severity="warn"))
+    before = SqliteStore(Path(config.store.path), config)
+    told = issue(id="i-told")
+    before.note_notified(told.id, told.severity.rank, 900.0)
+    before.close()
+    fake_connect(monkeypatch, [])
+    sent: list = []
+
+    async def send(notification):
+        sent.append(notification.issue_id)
+        return None
+    svc = await service.open_service(config, environ={}, judge=FakeJudge(), send=send,
+                                     clock=lambda: 1000.0)
+    try:
+        await svc._notifier.consider(told)
+        await svc._notifier.consider(issue(id="i-new"))
+        assert sent == ["i-new"]
+        assert set(svc.store.notified()) == {"i-told", "i-new"}
     finally:
         await svc.close()
 

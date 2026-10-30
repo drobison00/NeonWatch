@@ -102,6 +102,9 @@ the agent API skip that confirmation** (see [`agent-api.md`](agent-api.md)).
 | `min_severity` | `"critical"` | `"info"`, `"watch"`, `"warn"` or `"critical"`. |
 | `rate_limit_s` | `"5m"` | Before the same issue may notify again. |
 
+An issue notifies once per severity it reaches, never again at the same or a lower one. What was
+sent is kept in the store, so restarting the service does not repeat it.
+
 ## `[retention]`
 
 Whichever limit is reached first. It applies to the dashboard's database and, at 1.25×, to the

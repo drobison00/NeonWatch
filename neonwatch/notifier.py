@@ -12,8 +12,10 @@ the injected `send`, which the service wires to `gdbus_send` (and tests to a fak
   summary per window says how many were held since the last summary.
 
 An issue that was held or whose send failed is not recorded as sent, so its next update after
-the limit clears delivers it. `send` returns an error string or None, and never raises;
-`gdbus_send` keeps that contract so no desktop failure reaches the service loop.
+the limit clears delivers it. What was sent is handed to `record` as well, and a new notifier
+starts from `sent`, so a restarted service does not tell the desktop again. `send` returns an
+error string or None, and never raises; `gdbus_send` keeps that contract so no desktop failure
+reaches the service loop.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ import asyncio
 import os
 import stat
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from neonwatch.config import Config
@@ -57,16 +59,19 @@ Send = Callable[[Notification], Awaitable[str | None]]
 
 
 class Notifier:
-    def __init__(self, send: Send, config: Config, clock: Callable[[], float]) -> None:
+    def __init__(self, send: Send, config: Config, clock: Callable[[], float],
+                 sent: Mapping[str, tuple[int, float]] | None = None,
+                 record: Callable[[str, int, float], None] | None = None) -> None:
         self._send = send
+        self._record = record
         self._enabled = config.notify.enabled
         self._min_rank = Severity(config.notify.min_severity).rank
         self._rate_limit_s = config.notify.rate_limit_s
         self._clock = clock
         #: issue id -> the highest severity rank sent for it.
-        self._sent_rank: dict[str, int] = {}
+        self._sent_rank: dict[str, int] = {i: rank for i, (rank, _) in (sent or {}).items()}
         #: issue id -> when it was last sent.
-        self._sent_at: dict[str, float] = {}
+        self._sent_at: dict[str, float] = {i: at for i, (_, at) in (sent or {}).items()}
         #: When each recent issue notification went out, oldest first.
         self._window: deque[float] = deque()
         #: issue id -> urgency, for issues held by the global limit since the last summary.
@@ -98,6 +103,8 @@ class Notifier:
             return None
         self._sent_rank[issue.id] = rank
         self._sent_at[issue.id] = now
+        if self._record is not None:
+            self._record(issue.id, rank, now)
         self._window.append(now)
         self._held.pop(issue.id, None)
         return notification

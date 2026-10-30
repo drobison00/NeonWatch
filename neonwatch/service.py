@@ -521,7 +521,8 @@ async def open_service(config: Config, *, environ: Mapping[str, str], judge: Any
         service = Service(config, evaluator_bus=connections[0], viewer_bus=connections[1],
                           notifier_bus=connections[2], store=store, judge=judge,
                           evaluator=evaluator,
-                          notifier=Notifier(logging_send(send), config, clock),
+                          notifier=Notifier(logging_send(send), config, clock,
+                                            sent=store.notified(), record=store.note_notified),
                           analyst=_analyst(config, environ), token=secrets.token_urlsafe(32),
                           clock=clock, out=out or sys.stdout, ssl_context=ssl_context,
                           agent_token=_agent_token(config))

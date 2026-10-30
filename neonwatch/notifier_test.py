@@ -64,6 +64,35 @@ def make(min_severity: str = "critical", rate_limit_s: int = 300, enabled: bool 
     return Notifier(sent, config, clock), sent, clock
 
 
+# --- across a restart ----------------------------------------------------------------------
+
+
+async def test_what_was_sent_is_recorded_and_a_new_notifier_does_not_send_it_again():
+    # 2026-10-30: every service restart re-sent every open issue to the desktop.
+    recorded: dict[str, tuple[int, float]] = {}
+    config = Config(notify=Notify(min_severity="warn", rate_limit_s=300))
+    sent, clock = Sent(), Clock()
+    first = Notifier(sent, config, clock, record=lambda i, r, at: recorded.update({i: (r, at)}))
+    assert await first.consider(issue()) is not None
+    assert recorded == {"disk-nvme0": (Severity.CRITICAL.rank, clock())}
+    clock.now += 3600
+    again = Notifier(sent, config, clock, sent=recorded)
+    assert await again.consider(issue()) is None                        # same severity: once
+    assert await again.consider(issue(severity=Severity.WARN)) is None   # lower: never
+    assert await again.consider(issue(id="disk-nvme1")) is not None            # another issue: sent
+    assert len(sent.calls) == 2
+
+
+async def test_an_escalation_after_a_restart_still_waits_out_the_rate_limit():
+    config = Config(notify=Notify(min_severity="warn", rate_limit_s=300))
+    sent, clock = Sent(), Clock()
+    earlier = {"disk-nvme0": (Severity.WARN.rank, clock() - 60)}
+    restarted = Notifier(sent, config, clock, sent=earlier)
+    assert await restarted.consider(issue()) is None    # CRITICAL, but WARN went 60 s ago
+    clock.now += 300
+    assert await restarted.consider(issue()) is not None
+
+
 # --- threshold and state -------------------------------------------------------------------
 
 

@@ -287,6 +287,8 @@ _DDL = (
     "CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, at REAL NOT NULL, "
     "agent TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, detail TEXT NOT NULL)",
     "CREATE INDEX IF NOT EXISTS audit_at ON audit (at)",
+    "CREATE TABLE IF NOT EXISTS notified (issue_id TEXT PRIMARY KEY, rank INTEGER NOT NULL, "
+    "at REAL NOT NULL)",
     "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
 )
 #: Columns added to a table after it first shipped: (table, column, its declaration).
@@ -305,6 +307,7 @@ _AGE_PRUNE = (
     "DELETE FROM links WHERE at < ?",
     "DELETE FROM links_latest WHERE at < ?",
     "DELETE FROM analyses WHERE completed_at < ?",
+    "DELETE FROM notified WHERE at < ?",
 )
 
 #: Size-pruning tiers, each the oldest rows first: every history table merged in time order,
@@ -511,6 +514,15 @@ class Store:
                 "VALUES (?, ?, ?)",
                 [(name, at, new) for name in rows])
 
+    def note_notified(self, issue_id: str, rank: int, at: float) -> None:
+        """Record that the desktop was told about an issue at a severity rank, so a restart
+        does not tell it again (2026-10-30: every restart re-sent every open issue)."""
+        with self._tx():
+            self._db.execute(
+                "INSERT INTO notified (issue_id, rank, at) VALUES (?, ?, ?) ON CONFLICT(issue_id) "
+                "DO UPDATE SET rank = max(rank, excluded.rank), at = excluded.at",
+                (issue_id, rank, at))
+
     def _save_cached(self, cls: type, records: Iterable[Any]) -> int:
         table, cap = _CACHES[cls]
         columns = [f.name for f in dataclasses.fields(cls)]
@@ -701,6 +713,11 @@ class Store:
         """Each service ever noted: when it was first seen, and whether it was new then."""
         return {name: (at, bool(new)) for name, at, new in self._db.execute(
             "SELECT name, first_seen_at, new FROM service_sightings")}
+
+    def notified(self) -> dict[str, tuple[int, float]]:
+        """Each issue the desktop was told about: the highest severity rank sent, and when."""
+        return {issue_id: (rank, at) for issue_id, rank, at in self._db.execute(
+            "SELECT issue_id, rank, at FROM notified")}
 
     def service_descriptions(self, names: Iterable[str]) -> dict[str, ServiceDescription]:
         """The cached descriptions of those of the units `names` that have one, by name, for
