@@ -301,7 +301,8 @@ A process entry (`proc`) has these fields:
 | `uninterruptible` | int | processes whose state starts with `D` |
 | `top_cpu` | list[proc] | top 20 by `cpu_pct`, ties broken by pid |
 | `top_rss` | list[proc] | top 20 by `rss_kb`, ties broken by pid |
-| `from_tmp` | list[proc] | up to 20 processes whose `args` starts with `/tmp/`, `/var/tmp/` or `/dev/shm/`; each raises `process.runs_from_tmp` |
+| `from_tmp` | list[proc] | up to 20 processes whose `args` starts with `/tmp/`, `/var/tmp/` or `/dev/shm/`, other than a test run's (below); each raises `process.runs_from_tmp` |
+| `tmp_test_runs` | list[run] | up to 20 pytest runs whose programs run from `/tmp/pytest-of-<user>/`: the first ancestor outside a temporary directory (at most 8 up) runs pytest. Each is `pid`, `user`, `pid_ns` and `args` of the runner, `processes` (how many), `programs` (up to 3) and `pids` (up to 20); each raises one INFO `process.tests_from_tmp` |
 | `redacted` | int | secret-shaped strings cut from command lines |
 | `skipped` | int | ps lines that could not be read |
 

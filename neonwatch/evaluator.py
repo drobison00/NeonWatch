@@ -496,6 +496,8 @@ def _processes(d: dict[str, Any], p: dict[str, Any] | None, dt: float | None) ->
                                  "uninterruptible")}
     for key, n in (("top_cpu", TOP_N), ("top_rss", TOP_N), ("from_tmp", NAMES)):
         out[key] = _recent(_rows(d, key)[:n], p, dt)
+    out["tmp_test_runs"] = [{k: r.get(k) for k in ("pid", "user", "pid_ns", "args", "processes")}
+                            for r in _rows(d, "tmp_test_runs")[:NAMES]]
     return out
 
 
@@ -1225,6 +1227,8 @@ class Evaluator:
         rows = {r.get("pid"): r for key in ("top_cpu", "top_rss", "from_tmp")
                 for r in _rows(d, key)}
         tmp = {r.get("pid") for r in _rows(d, "from_tmp")}
+        tested = {pid: r.get("args") for r in _rows(d, "tmp_test_runs")
+                  for pid in (r.get("pids") if isinstance(r.get("pids"), list) else [])}
         memory = s.latest.get("memory", (0.0, {}))[1]
         total = _num(memory, "mem_total_kb")
         machine = {"cpus": s.latest.get("cpu.stat", (0.0, {}))[1].get("cpus"),
@@ -1251,7 +1255,10 @@ class Evaluator:
                 hot.append((pid not in tmp, -(cpu or 0), -(rss or 0), pid, compact, why))
         hot.sort(key=lambda h: h[:4])
         return [(ContextKind.PROCESS, "processes", f"process:{pid}",
-                 {"process": compact, "why": why, "machine": machine})
+                 {"process": compact, "why": why, "machine": machine}
+                 | ({"test_run": {"runner": tested[pid], "directory": "pytest's own, under "
+                                  "/tmp/pytest-of-<user>, writable by that user alone"}}
+                    if pid in tested else {}))
                 for _, _, _, pid, compact, why in hot[:MAX_PROCESSES]]
 
     def _bursts(self, errors: dict | None, warnings: dict | None

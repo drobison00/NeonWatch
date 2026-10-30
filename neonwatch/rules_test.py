@@ -935,6 +935,7 @@ def triggers() -> dict[str, Snapshot]:
         "job.runs_from_tmp": snap(jobs=[job(command="/tmp/x"), timer(command="/dev/shm/y")]),
         "job.crontab_flood": snap(jobs=[job(file="/etc/cron.d/a b", overflow=1)]),
         "process.runs_from_tmp": snap({"processes": {"from_tmp": [tmp_proc()]}}),
+        "process.tests_from_tmp": snap({"processes": {"tmp_test_runs": [run_row()]}}),
     }
 
 
@@ -1080,6 +1081,46 @@ def test_the_directory_is_named_a_long_path_is_cut_and_findings_are_capped():
     many = [tmp_proc(pid=100 + i) for i in range(rules.PROCESS_FINDINGS + 5)]
     assert len(found(snap({"processes": {"from_tmp": many}}), "process.runs_from_tmp")) == \
         rules.PROCESS_FINDINGS
+
+
+def run_row(pid=500, n=3, ns="separate", args="python -m pytest -q tests/acceptance"):
+    return {"pid": pid, "user": "10001", "pid_ns": ns, "args": args, "processes": n,
+            "programs": ["/tmp/pytest-of-alice/pytest-0/t0/venv/bin/python"],
+            "pids": [501, 502, 503]}
+
+
+def test_a_pytest_run_from_its_own_tmp_directory_is_one_info_finding_about_the_runner():
+    f = only(snap({"processes": {"tmp_test_runs": [run_row()]}}, at=NOW - 30),
+             "process.tests_from_tmp")
+    assert f.severity is Severity.INFO and f.entity == "process:500"
+    assert f.title == ("A test run in a container or sandbox is running 3 programs from its own "
+                       "/tmp directory: python -m pytest -q tests/acceptance")
+    assert f.evidence == {"runner": "python -m pytest -q tests/acceptance", "user": "10001",
+                          "pid": 500, "pid_ns": "separate", "processes": 3,
+                          "programs": ["/tmp/pytest-of-alice/pytest-0/t0/venv/bin/python"],
+                          "seen_at": NOW - 30}
+    assert f.next_step == "ps -o pid,ppid,user,lstart,args -p 500 --ppid 500"
+    assert "pytest-of-<user>" in f.why
+    assert found(snap({"processes": {"tmp_test_runs": [run_row()]}}),
+                 "process.runs_from_tmp") == []
+
+
+def test_a_test_runs_title_counts_one_program_and_cuts_a_long_runner():
+    one = only(snap({"processes": {"tmp_test_runs": [run_row(n=1, ns="host")]}}),
+               "process.tests_from_tmp")
+    assert one.title.startswith("A test run is running 1 program from its own /tmp directory")
+    long = "python -m pytest " + "t" * 200
+    cut = only(snap({"processes": {"tmp_test_runs": [run_row(args=long)]}}),
+               "process.tests_from_tmp")
+    assert cut.title.endswith(long[:rules.TITLE_PATH_CHARS - 1] + "…")
+
+
+def test_malformed_test_runs_are_skipped_and_findings_are_capped():
+    runs = [{"pid": "x"}, "junk",
+            *[run_row(pid=100 + i) for i in range(rules.PROCESS_FINDINGS + 5)]]
+    assert len(found(snap({"processes": {"tmp_test_runs": runs}}), "process.tests_from_tmp")) \
+        == rules.PROCESS_FINDINGS - 1
+    assert found(snap({}), "process.tests_from_tmp") == []
 
 
 def test_no_parent_and_malformed_rows_and_no_snapshot():

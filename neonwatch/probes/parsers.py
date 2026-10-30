@@ -63,6 +63,13 @@ KEPT_BYTES = MAX_BYTES // 2
 #: Read first, so no user's crontab can spend the caps before root's is read.
 ROOT_CRONTAB = "/var/spool/cron/crontabs/root"
 TMP_DIRS = ("/tmp/", "/var/tmp/", "/dev/shm/")
+#: pytest's own temporary directory. pytest makes /tmp/pytest-of-<user> 0700 and refuses one
+#: that another user owns, so only that user could swap a program in it.
+PYTEST_TMP = "/tmp/pytest-of-"
+#: A command line that runs pytest: `pytest`, `py.test`, a path ending in either, or `-m pytest`.
+PYTEST = re.compile(r"(?:^|[/\s])py\.?test(?:\s|$)|\s-m\s+pytest(?:\s|$)")
+#: Parents walked from a program in a temporary directory to the first one outside it.
+ANCESTRY = 8
 
 Data = dict[str, Any]
 
@@ -487,10 +494,43 @@ def _namespaces(procs: list[Data]) -> None:
         p["pid_ns"] = None if host is None or ns is None else "host" if ns == host else "separate"
 
 
+def _from_tmp(procs: list[Data]) -> tuple[list[Data], list[Data]]:
+    """Processes whose program is in a temporary directory, split in two. A test run's: the
+    program is under `PYTEST_TMP` and the first ancestor outside a temporary directory runs
+    pytest; those are grouped by that runner (2026-10-30: every test of a suite in a container
+    was a separate issue). Everything else is listed one row per process, as before."""
+    by_pid = {p["pid"]: p for p in procs}
+    rows: list[Data] = []
+    runs: dict[int, Data] = {}
+    for proc in procs:
+        if not proc["args"].startswith(TMP_DIRS):
+            continue
+        runner = by_pid.get(proc["ppid"])
+        for _ in range(ANCESTRY):
+            if runner is None or not runner["args"].startswith(TMP_DIRS):
+                break
+            runner = by_pid.get(runner["ppid"])
+        if (runner is None or runner["args"].startswith(TMP_DIRS)
+                or not proc["args"].startswith(PYTEST_TMP) or not PYTEST.search(runner["args"])):
+            rows.append(proc)
+            continue
+        run = runs.setdefault(runner["pid"], {
+            "pid": runner["pid"], "user": runner["user"], "pid_ns": runner["pid_ns"],
+            "args": runner["args"], "processes": 0, "programs": [], "pids": []})
+        run["processes"] += 1
+        if len(run["pids"]) < FROM_TMP_N:
+            run["pids"].append(proc["pid"])
+        program = proc["args"].split(" ", 1)[0]
+        if program not in run["programs"] and len(run["programs"]) < 3:
+            run["programs"].append(program)
+    return rows[:FROM_TMP_N], list(runs.values())[:FROM_TMP_N]
+
+
 def parse_processes(raw: bytes) -> Data:
     read, skipped = _records(_lines(raw), _process, "ps line")
     procs = [proc for proc, _ in read]
     _namespaces(procs)
+    from_tmp, test_runs = _from_tmp(procs)
     return {
         "count": len(procs),
         "threads": sum(p["threads"] for p in procs),
@@ -500,7 +540,8 @@ def parse_processes(raw: bytes) -> Data:
         "uninterruptible": sum(p["state"].startswith("D") for p in procs),
         "top_cpu": sorted(procs, key=lambda p: (-p["cpu_pct"], p["pid"]))[:TOP_N],
         "top_rss": sorted(procs, key=lambda p: (-p["rss_kb"], p["pid"]))[:TOP_N],
-        "from_tmp": [p for p in procs if p["args"].startswith(TMP_DIRS)][:FROM_TMP_N],
+        "from_tmp": from_tmp,
+        "tmp_test_runs": test_runs,
         "redacted": sum(found for _, found in read),
         "skipped": skipped,
     }

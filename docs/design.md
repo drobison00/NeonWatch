@@ -144,6 +144,11 @@ more:
   (`process:<pid>`) with its row as evidence, and the processes domain no longer asks
   `runs_from_tmp`. The process's own context still asks what it is and whether it is suspicious,
   and those answers join the rule's issue (rule prefix `process` is the `processes` domain).
+  A pytest run's programs under `/tmp/pytest-of-<user>/` are the exception (2026-10-30): pytest
+  makes that directory for its user alone, so nobody else could swap them. The parser groups
+  them under their runner, `process.tests_from_tmp` raises one INFO finding per run, and a busy
+  one asked about on its own carries `test_run` (the runner), so a suite is not one CRITICAL
+  issue per test.
 - **The issue says what happened.** An issue carries `evidence` (the leading finding's, else the
   leading attestation's) and `why` (the rule's sentence on why it matters). A judge-raised title
   is the cause in words and what it is about, named from the evidence ("CPU runaway: python3

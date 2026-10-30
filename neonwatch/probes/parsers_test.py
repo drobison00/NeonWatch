@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from neonwatch import schema
-from neonwatch.probes import CATALOG, ParseError, frame_files, frame_listing, parse
+from neonwatch.probes import CATALOG, ParseError, frame_files, frame_listing, parse, parsers
 from neonwatch.probes.catalog import JOURNAL_ERROR_LINES, JOURNAL_LINES
 from neonwatch.probes.parsers import (
     APT_NAMES,
@@ -441,6 +441,65 @@ def test_processes_top_lists_and_entry_shape() -> None:
 def test_processes_running_from_tmp_are_listed() -> None:
     data = p("processes", PS)
     assert [(e["pid"], e["comm"]) for e in data["from_tmp"]] == [(4242, "xmrig")]
+    assert data["tmp_test_runs"] == []
+
+
+def ps_line(pid: int, ppid: int, args: str, user: str = "10001", ns: int = 4026532000) -> str:
+    return (f"{pid:7d} {ppid:7d} {user:<32} S     0.0  2048     100    1        0 {ns} "
+            f"python          {args}")
+
+
+RUNNER = "python -m pytest -q tests/acceptance"
+VENV = "/tmp/pytest-of-alice/pytest-0/test_r37_route0/venv/bin/python"
+
+
+def test_a_pytest_runs_programs_are_grouped_under_the_runner_not_listed_one_by_one() -> None:
+    # 2026-10-30: each test of a suite in a container was its own CRITICAL issue.
+    raw = "\n".join([
+        ps_line(1, 0, "/sbin/init", "root", 4026531836),
+        ps_line(500, 1, RUNNER),
+        ps_line(501, 500, VENV + " -c from worker.supervisor import main"),
+        ps_line(502, 501, VENV + " -I -m worker.child"),   # a grandchild, through the tmp one
+        ps_line(503, 500, VENV + " -I -m worker.child"),
+        ps_line(600, 1, "/tmp/.x/xmrig --donate-level 1"),
+    ]).encode()
+    data = p("processes", raw)
+    assert [e["pid"] for e in data["from_tmp"]] == [600]
+    assert data["tmp_test_runs"] == [{
+        "pid": 500, "user": "10001", "pid_ns": "separate", "args": RUNNER, "processes": 3,
+        "programs": [VENV], "pids": [501, 502, 503]}]
+
+
+@pytest.mark.parametrize("runner, program", [
+    ("python -m pytester run", VENV),                # not pytest
+    ("/usr/bin/bash run.sh", VENV),                  # not a test runner at all
+    (RUNNER, "/tmp/go-build1/b001/exe/main"),        # pytest, but not its own directory
+    ("/tmp/venv/bin/python -m pytest", VENV),        # the runner itself lives in /tmp
+])
+def test_anything_short_of_pytest_running_from_its_own_directory_stays_listed(runner,
+                                                                               program) -> None:
+    raw = "\n".join([ps_line(500, 1, runner), ps_line(501, 500, program)]).encode()
+    data = p("processes", raw)
+    assert 501 in [e["pid"] for e in data["from_tmp"]] and data["tmp_test_runs"] == []
+
+
+def test_an_orphan_or_a_chain_too_deep_to_reach_its_runner_stays_listed() -> None:
+    orphan = ps_line(501, 499, VENV)                  # its parent is not in the table
+    chain = [ps_line(500, 1, RUNNER)] + [
+        ps_line(510 + i, 509 + i if i else 500, VENV) for i in range(parsers.ANCESTRY + 2)]
+    data = p("processes", "\n".join([orphan, *chain]).encode())
+    listed = {e["pid"] for e in data["from_tmp"]}
+    assert 501 in listed and 510 + parsers.ANCESTRY + 1 in listed
+    assert 510 not in listed   # the first link is still the runner's
+
+
+def test_a_test_run_keeps_three_programs_and_caps_its_pids() -> None:
+    lines = [ps_line(500, 1, RUNNER)] + [
+        ps_line(600 + i, 500, f"/tmp/pytest-of-alice/pytest-0/t{i}/venv/bin/python")
+        for i in range(parsers.FROM_TMP_N + 5)]
+    (run,) = p("processes", "\n".join(lines).encode())["tmp_test_runs"]
+    assert run["processes"] == parsers.FROM_TMP_N + 5
+    assert len(run["programs"]) == 3 and len(run["pids"]) == parsers.FROM_TMP_N
 
 
 def test_processes_say_which_run_in_pid_1s_pid_namespace() -> None:

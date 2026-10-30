@@ -1415,6 +1415,28 @@ async def test_a_program_run_from_tmp_is_one_issue_about_that_process_rule_and_j
 
 
 @pytest.mark.asyncio
+async def test_a_busy_test_run_process_is_asked_about_with_its_runner_named():
+    # A pytest run's program under /tmp/pytest-of-<user> is not a /tmp suspect (the rule makes one
+    # INFO finding for the run); hot enough to be asked about, the judge is told whose it is.
+    row = proc(3320261, "python", cpu_pct=150.0, elapsed_s=600,
+               args="/tmp/pytest-of-alice/pytest-0/t0/venv/bin/python -m worker.child")
+    run_ = {"pid": 500, "user": "10001", "pid_ns": "separate", "args": "python -m pytest -q",
+            "processes": 1, "programs": [row["args"].split()[0]], "pids": [3320261]}
+    e, judge, _ = make(FakeJudge({}))
+    feed(e, {"processes": processes(row) | {"tmp_test_runs": [run_]}}, T0 - 60)
+    busier = row | {"cpu_s": row["cpu_s"] + 90, "elapsed_s": 660}     # 150% over the minute
+    feed(e, {"processes": processes(busier) | {"tmp_test_runs": [run_]}}, T0)
+    collation = await run(e, T0 + 1)
+    asked = judge.last["process:3320261"]
+    assert asked.state["test_run"]["runner"] == "python -m pytest -q"
+    assert "process:3320261|det" not in issues_by(collation)   # no /tmp finding about it
+    assert only_issue(collation, "process:500").severity is INFO
+    domain = judge.last["domain:processes"].state["processes"]
+    assert domain["tmp_test_runs"] == [{k: run_[k] for k in
+                                        ("pid", "user", "pid_ns", "args", "processes")}]
+
+
+@pytest.mark.asyncio
 async def test_an_adopted_issue_keeps_its_evidence_and_why():
     stored = Issue("i-1", OPEN, WARN, "t", "processes", PY, T0, T0, True, ("r",), "step",
                    evidence={"pid": 4242}, why="because", last_seen=T0)

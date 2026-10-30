@@ -559,6 +559,33 @@ def process_runs_from_tmp(s: Snapshot, c: Config) -> Iterable[Alarm]:
             f"and the journal at that moment usually say which.")
 
 
+def process_tests_from_tmp(s: Snapshot, c: Config) -> Iterable[Alarm]:
+    """One INFO finding per pytest run whose test programs run from pytest's own directory under
+    /tmp (`tmp_test_runs`), about the runner. That directory is the user's alone, so nobody else
+    could have swapped the program; it is shown rather than dropped, so a test run is visible as
+    what is running from /tmp, and these are not asked about one process at a time."""
+    entry = s.latest.get("processes")
+    if entry is None or not isinstance(entry[1], dict):
+        return
+    at, data = entry
+    for run in _dicts(data, "tmp_test_runs")[:PROCESS_FINDINGS]:
+        if (pid := _int(run, "pid")) is None:
+            continue
+        args, n = _str(run, "args"), _int(run, "processes") or 0
+        shown = args if len(args) <= TITLE_PATH_CHARS else args[:TITLE_PATH_CHARS - 1] + "…"
+        aside = " in a container or sandbox" if run.get("pid_ns") == "separate" else ""
+        yield Alarm(
+            INFO, f"A test run{aside} is running {n} program{'s' * (n != 1)} from its own "
+            f"/tmp directory: {shown}", f"process:{pid}",
+            {"runner": args[:COMMAND_CHARS], "user": _str(run, "user"), "pid": pid,
+             "pid_ns": run.get("pid_ns"), "processes": n, "programs": run.get("programs"),
+             "seen_at": at},
+            f"ps -o pid,ppid,user,lstart,args -p {pid} --ppid {pid}",
+            "pytest runs its test programs from /tmp/pytest-of-<user>, which it makes for that "
+            "user alone and refuses if anyone else owns it, so no other account could have "
+            "swapped them. The runner is named so you can tell whose test run it is.")
+
+
 def job_crontab_flood(s: Snapshot, c: Config) -> Iterable[Alarm]:
     """A file holding more entries than the parser reads per file (`overflow`, missing is 0):
     the jobs past the cap are not seen, by the dashboard, the rules or the judge."""
@@ -750,6 +777,7 @@ RULES: dict[str, Rule] = {
     "job.runs_from_tmp": job_runs_from_tmp,
     "job.crontab_flood": job_crontab_flood,
     "process.runs_from_tmp": process_runs_from_tmp,
+    "process.tests_from_tmp": process_tests_from_tmp,
     "journal.flood": journal_flood,
     "listener.new_wildcard": listener_new_wildcard,
     "net.interface_churn": net_interface_churn,
