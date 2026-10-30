@@ -233,6 +233,15 @@ textarea { width: 100%; padding: 4px 6px; resize: vertical; }
   border-radius: 4px;
   padding: 6px 10px;
 }
+/* The card an address (#/issues/<id>) pointed at: outlined, and briefly lit. */
+.card.targeted {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  animation: card-targeted 1.2s ease-out 2;
+}
+.card.targeted:focus { outline: 2px solid var(--focus); }
+@keyframes card-targeted { from { box-shadow: 0 0 0 6px color-mix(in srgb, var(--focus) 45%, transparent); } to { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .card.targeted { animation: none; } }
 .card.card-critical { border-left-color: var(--critical); }
 .card.card-warn { border-left-color: var(--warn); }
 .card.card-watch { border-left-color: var(--watch); }

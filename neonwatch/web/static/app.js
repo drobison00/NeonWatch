@@ -507,6 +507,7 @@
     if (!incidents.length && !standalone.length) box.appendChild(emptyState());
 
     renderHeld();
+    revealWanted();
   }
 
   function newestAttestationAt() {
@@ -641,7 +642,8 @@
   function updateIssueCard(card, issue, extra) {
     const sig = JSON.stringify([issue, extra || null]);
     card._foldKey = `issue:${issue.id}`;
-    card.className = `card card-${issue.severity} state-${issue.state}${extra && extra.cause ? " cause" : ""}`;
+    card.dataset.issue = issue.id;
+    card.className = `card card-${issue.severity} state-${issue.state}${extra && extra.cause ? " cause" : ""}${card.classList.contains("targeted") ? " targeted" : ""}`;
     card.classList.toggle("folded", state.folded.has(card._foldKey));
     if (sig !== card._sig) {
       card._sig = sig;
@@ -2231,8 +2233,9 @@
     list.timer = setTimeout(() => loadList(name), 2000);
   }
 
-  function showView(view) {
+  function showView(view, record = true) {
     if (state.authFailed) return;
+    if (record && view !== state.view && NAME_OF[view]) history.pushState(null, "", `#/view/${NAME_OF[view]}`);
     state.view = view;
     for (const b of document.querySelectorAll("button.view-tab")) b.setAttribute("aria-pressed", String(b.dataset.view === view));
     for (const id of VIEWS) $(id).hidden = id !== view;
@@ -2246,6 +2249,69 @@
       if (r) return list.describe(r);
     }
     return "";
+  }
+
+  // --- addresses ------------------------------------------------------------------------------
+  // `#/view/<name>` opens a view and `#/issues/<id>` one issue, so a link, a notification or the
+  // desktop app can point here, and back and forward move between them. The fragment survives
+  // the `/?token=` sign-in redirect, since the server never sees it.
+  const VIEW_NAMES = { attention: "layout", scheduled: "sched", services: "svc", logs: "logs", board: "board" };
+  const NAME_OF = Object.fromEntries(Object.entries(VIEW_NAMES).map(([name, view]) => [view, name]));
+  const ISSUE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+
+  function parseAddress(hash) {
+    const m = /^#\/(view|issues)\/([^/?#]+)$/.exec(hash || "");
+    if (!m) return null;
+    let value;
+    try { value = decodeURIComponent(m[2]); } catch { return null; }
+    if (m[1] === "view") return VIEW_NAMES[value] ? { view: VIEW_NAMES[value] } : null;
+    return ISSUE_ID.test(value) ? { view: "layout", issue: value } : null;
+  }
+
+  function followAddress() {
+    const to = parseAddress(location.hash);
+    if (!to || state.authFailed) return;
+    showView(to.view, false);
+    if (to.issue) showIssue(to.issue);
+  }
+
+  // The issue's card wherever it is (on its own, in an incident, or held), unfolded with what
+  // holds it, scrolled to and marked. The address is followed at once, before the issues have
+  // loaded, so the wanted issue waits here and every render of the issues tries again; one still
+  // not on the page once the open and held issues have both loaded says what became of it.
+  function showIssue(id) {
+    state.wantIssue = id;
+    revealWanted();
+  }
+
+  async function revealWanted() {
+    const id = state.wantIssue;
+    if (!id) return;
+    const cards = [...document.querySelectorAll("article.card")].filter((c) => c.dataset.issue === id);
+    const card = cards.find((c) => !c.closest("#held")) || cards[0];
+    if (!card && !(state.overview && state.heldLoaded)) return;
+    state.wantIssue = null;
+    if (card) {
+      for (let node = card; node; node = node.parentElement) {
+        if (node.tagName === "DETAILS") node.open = true;
+        if (node._foldKey && state.folded.delete(node._foldKey)) applyFold(node);
+      }
+      saveFolded();
+      for (const old of document.querySelectorAll("article.card.targeted")) old.classList.remove("targeted");
+      card.classList.add("targeted");
+      card.tabIndex = -1;
+      card.scrollIntoView({ block: "center", behavior: "smooth" });
+      card.focus({ preventScroll: true });
+      setTimeout(() => card.classList.remove("targeted"), 4000);
+      return;
+    }
+    try {
+      const found = await api(`/api/issues/${encodeURIComponent(id)}`);
+      const issue = found && found.issue;
+      reportOk(issue ? `${issue.title}: ${issue.state}, so it is not shown with the open issues.` : `No issue ${id}.`);
+    } catch (e) {
+      reportOk(e.status === 404 ? `No issue ${id}: it was resolved and pruned, or never existed.` : `Issue ${id}: ${e.message}`);
+    }
   }
 
   // --- explained on request: the flow the Logs and Services views share -----------------------
@@ -2769,6 +2835,7 @@
     } catch (e) {
       reportError("held issues", e);
     }
+    state.heldLoaded = true;
     scheduleRender();
   }
 
@@ -2953,6 +3020,9 @@
     renderTrends();
     renderStrip();
     passwordMode().then((yes) => { $("logout").hidden = !yes; });
+    followAddress();
+    window.addEventListener("popstate", followAddress);
+    window.addEventListener("hashchange", followAddress);
     await Promise.all([loadOverview(), loadHealth()]);
     if (state.authFailed) return;
     loadSeries();

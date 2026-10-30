@@ -532,6 +532,84 @@ async def test_run_serves_prints_the_url_once_and_closes_everything_on_stop(tmp_
     await svc.close()   # idempotent
 
 
+def quiet_service(tmp_path: Path, config: Config) -> tuple[Service, io.StringIO]:
+    out = io.StringIO()
+    svc = Service(config, evaluator_bus=FakeBus(), viewer_bus=FakeBus(), notifier_bus=FakeBus(),
+                  store=SqliteStore(tmp_path / "s.sqlite3", config), judge=FakeJudge(),
+                  evaluator=FakeEvaluator(), notifier=FakeNotifier(), analyst=None,
+                  token="k" * 43, clock=time.time, out=out)
+    return svc, out
+
+
+async def started(out: io.StringIO) -> None:
+    for _ in range(200):
+        if out.getvalue():
+            return
+        await asyncio.sleep(0.01)
+
+
+async def test_run_writes_the_url_for_the_desktop_app_privately_and_removes_it_on_stop(tmp_path):
+    config = web_config(tmp_path)
+    svc, out = quiet_service(tmp_path, config)
+    stop = asyncio.Event()
+    running = asyncio.create_task(svc.run(stop))
+    await started(out)
+    written = tmp_path / service.URL_FILE
+    assert written.read_text() == out.getvalue()
+    assert stat.S_IMODE(written.stat().st_mode) == 0o600
+    assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".")] == []   # no staging
+    stop.set()
+    assert await running == 0
+    assert not written.exists()
+
+
+async def test_a_url_file_another_service_has_replaced_is_left_alone(tmp_path):
+    config = web_config(tmp_path)
+    svc, out = quiet_service(tmp_path, config)
+    stop = asyncio.Event()
+    running = asyncio.create_task(svc.run(stop))
+    await started(out)
+    (tmp_path / service.URL_FILE).write_text("http://127.0.0.1:1/?token=newer\n")
+    stop.set()
+    assert await running == 0
+    assert (tmp_path / service.URL_FILE).read_text() == "http://127.0.0.1:1/?token=newer\n"
+
+
+async def test_a_url_file_that_cannot_be_written_or_removed_only_warns(tmp_path, monkeypatch,
+                                                                      caplog):
+    config = web_config(tmp_path)
+    svc, out = quiet_service(tmp_path, config)
+
+    def refuse(where, text):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(service, "write_private", refuse)
+    stop = asyncio.Event()
+    running = asyncio.create_task(svc.run(stop))
+    await started(out)
+    stop.set()
+    assert await running == 0
+    assert "cannot sign in by itself" in caplog.text
+    svc._withdraw_url(tmp_path / "missing" / service.URL_FILE)   # gone already: warns, no raise
+    assert "could not remove" in caplog.text
+
+
+def test_write_private_replaces_a_symlink_instead_of_writing_through_it(tmp_path):
+    target = tmp_path / "victim"
+    target.write_text("keep")
+    link = tmp_path / service.URL_FILE
+    link.symlink_to(target)
+    service.write_private(link, "url\n")
+    assert target.read_text() == "keep" and not link.is_symlink()
+    assert link.read_text() == "url\n" and stat.S_IMODE(link.stat().st_mode) == 0o600
+
+
+def test_write_private_leaves_no_staged_file_when_the_rename_fails(tmp_path):
+    (tmp_path / service.URL_FILE).mkdir()   # a directory is in the way: the rename fails
+    with pytest.raises(OSError):
+        service.write_private(tmp_path / service.URL_FILE, "url\n")
+    assert sorted(p.name for p in tmp_path.iterdir()) == [service.URL_FILE]
+
+
 async def test_run_wires_the_journal_reader_into_the_logs_view(tmp_path, monkeypatch):
     from neonwatch import logs
 

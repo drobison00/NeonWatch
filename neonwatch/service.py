@@ -20,6 +20,9 @@ once, the operator's way in. It is never logged, and aiohttp's access log (which
 printed is `https://<first allowed host>/`, and the browser logs in there. With `web.tls_cert`
 and `web.tls_key` set the dashboard is served over TLS 1.2 or later only, and the service will not
 start if either file is missing or unreadable, or if the key is reachable by group or other.
+The same URL is written to `dashboard.url` beside the store (mode 0600, replaced atomically, and
+removed when the service stops) for the desktop app, so it can sign in without the operator
+copying it; only the operator's account can read it, as it can already read stdout.
 
 `hash_password_command` is `neonwatch hash-password`: it lives here, not in the launcher, because
 the launcher is privileged code with a closed import list (no `getpass`, no web).
@@ -397,6 +400,7 @@ class Service:
         """Serve until `stop` is set (0), or until a task dies of a bug (1). Closes everything."""
         tasks: dict[asyncio.Task, str] = {}
         stop_web: Callable[[], Awaitable[None]] | None = None
+        url_file: Path | None = None
         try:
             app = web.make_app(self.store, self.live, self.token, self._config, self.analyst,
                                judge_health=self._judge_health, read_logs=logs.read_journal,
@@ -404,6 +408,7 @@ class Service:
             stop_web = await web.start(app, self._config.web.host, self._config.web.port,
                                        ssl_context=self.ssl_context)
             print(self.url(), file=self._out, flush=True)
+            url_file = self._publish_url()
             log.info("dashboard listening on %s:%d%s (%s)", self._config.web.host,
                      self._config.web.port, " over TLS" if self.ssl_context else "",
                      "log in at the URL on stdout" if self._config.web.password_hash
@@ -433,10 +438,31 @@ class Service:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             self.live.close()
+            if url_file is not None:
+                self._withdraw_url(url_file)
             if stop_web is not None:
                 await stop_web()
             await self.close()
             log.info("service stopped: %s", self.counts)
+
+    def _publish_url(self) -> Path | None:
+        """Write the dashboard URL to `URL_FILE` beside the store, for the desktop app. A failure
+        is logged and the service goes on: the URL is still on stdout."""
+        where = Path(self._config.store.path).expanduser().parent / URL_FILE
+        try:
+            write_private(where, self.url() + "\n")
+        except OSError as bad:
+            log.warning("the desktop app cannot sign in by itself: %s: %s", where, bad)
+            return None
+        return where
+
+    def _withdraw_url(self, where: Path) -> None:
+        """Remove `URL_FILE` if it is still ours, so an absent file means no service."""
+        try:
+            if where.read_text() == self.url() + "\n":
+                where.unlink()
+        except OSError as bad:
+            log.warning("could not remove %s: %s", where, bad)
 
     async def close(self) -> None:
         """Close the bus connections and the store. Safe to call again."""
@@ -452,6 +478,28 @@ class Service:
 
 
 # --- assembly ------------------------------------------------------------------------------------
+
+
+#: The dashboard URL for the desktop app, beside the store.
+URL_FILE = "dashboard.url"
+_STAGE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def write_private(where: Path, text: str) -> None:
+    """Write `text` to `where` as a 0600 file, atomically: a private staged file renamed over the
+    old one, which replaces a symlink rather than writing through it."""
+    staged = where.with_name(f".{where.name}.{secrets.token_hex(8)}")
+    fd = os.open(staged, _STAGE, 0o600)
+    try:
+        try:
+            os.fchmod(fd, 0o600)   # whatever the umask
+            os.write(fd, text.encode())
+        finally:
+            os.close(fd)
+        os.replace(staged, where)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
 
 
 def tls_context(settings: Web) -> ssl.SSLContext | None:
