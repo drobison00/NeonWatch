@@ -473,3 +473,111 @@ def test_the_command_line_uninstalls_the_user_units(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(services.Path, "home", lambda: tmp_path)
     assert services.main(["uninstall-user", "--no-systemctl"]) == 0
     assert "removed" in capsys.readouterr().out
+
+
+# --- scripts/install-agent -----------------------------------------------------------------------
+
+INSTALL = REPO / "scripts" / "install-agent"
+
+
+def fake(path: Path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n" + body)
+    path.chmod(0o755)
+
+
+@pytest.fixture
+def install_run(tmp_path):
+    """Runs a copy of the script in a tmp repo, with python, sudo and systemctl faked on PATH:
+    each records its argv to `calls`; `systemctl is-active` succeeds when `active` exists."""
+    repo, bin_, calls = tmp_path / "repo", tmp_path / "bin", tmp_path / "calls"
+    (repo / "scripts").mkdir(parents=True)
+    shutil.copy2(INSTALL, repo / "scripts" / "install-agent")
+    record = f'printf "%s\\n" "$(basename "$0") $*" >> {calls}\n'
+    fake(repo / ".venv" / "bin" / "python", record)
+    fake(bin_ / "sudo", record)
+    fake(bin_ / "systemctl", record + f'[ "$1" != is-active ] || [ -e {tmp_path / "active"} ]\n')
+
+    def run(active: bool = False, uid: str | None = None):
+        if active:
+            (tmp_path / "active").touch()
+        if uid is not None:
+            fake(bin_ / "id", f'[ "$1" = -u ] && echo {uid} || /usr/bin/id "$@"\n')
+        result = subprocess.run([str(repo / "scripts" / "install-agent")], capture_output=True,
+                                text=True, env={"PATH": f"{bin_}:/usr/bin:/bin"})
+        logged = calls.read_text().splitlines() if calls.exists() else []
+        return result, logged, repo
+    return run
+
+
+def test_the_install_script_bundles_as_you_installs_with_sudo_and_starts_a_stopped_unit(
+        install_run):
+    me = services.pwd.getpwuid(os.getuid()).pw_name
+    result, calls, repo = install_run()
+    assert result.returncode == 0, result.stderr
+    unit = f"neonwatch-agent@{me}.service"
+    assert calls == [
+        f"python {repo}/tools/services.py bundle",
+        f"sudo /usr/bin/python3 -I {repo}/tools/services.py install-agent --operator {me}",
+        f"systemctl is-active --quiet {unit}",
+        f"sudo systemctl start {unit}",
+        f"systemctl status --no-pager --lines=5 {unit}"]
+    assert f"journalctl -u {unit} -f" in result.stdout
+
+
+def test_the_install_script_leaves_a_running_unit_to_the_install_to_restart(install_run):
+    result, calls, _ = install_run(active=True)
+    assert result.returncode == 0
+    assert not [c for c in calls if c.startswith("sudo systemctl")]
+
+
+def test_the_install_script_refuses_root(install_run):
+    result, calls, _ = install_run(uid="0")
+    assert result.returncode == 1 and "not as root" in result.stderr and calls == []
+
+
+def test_the_install_script_needs_the_venv(install_run, tmp_path):
+    (tmp_path / "repo" / ".venv" / "bin" / "python").unlink()
+    result, calls, _ = install_run()
+    assert result.returncode == 1 and "uv sync" in result.stderr and calls == []
+
+
+def test_the_install_script_stops_at_the_first_failure(install_run, tmp_path):
+    fake(tmp_path / "repo" / ".venv" / "bin" / "python", "exit 3\n")
+    result, calls, _ = install_run()
+    assert result.returncode == 3 and calls == []   # bundle failed: nothing reached sudo
+
+
+UNINSTALL = REPO / "scripts" / "uninstall-agent"
+
+
+def run_uninstall(tmp_path: Path, uid: str | None = None):
+    repo, bin_, calls = tmp_path / "repo", tmp_path / "bin", tmp_path / "calls"
+    (repo / "scripts").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(UNINSTALL, repo / "scripts" / "uninstall-agent")
+    fake(bin_ / "sudo", f'printf "%s\\n" "sudo $*" >> {calls}\n')
+    if uid is not None:
+        fake(bin_ / "id", f'[ "$1" = -u ] && echo {uid} || /usr/bin/id "$@"\n')
+    result = subprocess.run([str(repo / "scripts" / "uninstall-agent")], capture_output=True,
+                            text=True, env={"PATH": f"{bin_}:/usr/bin:/bin"})
+    return result, calls.read_text().splitlines() if calls.exists() else [], repo
+
+
+def test_the_uninstall_script_asks_sudo_to_run_the_isolated_uninstall(tmp_path):
+    result, calls, repo = run_uninstall(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert calls == [f"sudo /usr/bin/python3 -I {repo}/tools/services.py uninstall-agent"]
+    assert "scripts/neonwatch-agent" in result.stdout
+
+
+def test_the_uninstall_script_refuses_root(tmp_path):
+    result, calls, _ = run_uninstall(tmp_path, uid="0")
+    assert result.returncode == 1 and "not as root" in result.stderr and calls == []
+
+
+@pytest.mark.parametrize("script", [INSTALL, UNINSTALL])
+def test_the_scripts_are_executable_posix_shell_that_stop_on_the_first_error(script):
+    text = script.read_text()
+    assert text.startswith("#!/bin/sh\n") and "\nset -eu\n" in text
+    assert os.access(script, os.X_OK)
+    assert "sudo /usr/bin/python3 -I " in text      # root runs the system python, isolated

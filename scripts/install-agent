@@ -1,0 +1,31 @@
+#!/bin/sh
+# Install or upgrade the root agent's system service, as yourself:  scripts/install-agent
+#
+# Builds the bundle as you (tools/services.py bundle), then asks sudo to install it into
+# /opt/neonwatch (tools/services.py install-agent, run by the system python, isolated). A running
+# neonwatch-agent@<you> is restarted onto the new copy by the install; one that is not running is
+# started here. Stop a hand-started agent (sudo scripts/neonwatch-agent) first, or two will run.
+set -eu
+if [ "$(id -u)" -eq 0 ]; then
+    echo "install-agent: run this as yourself, not as root; it asks sudo for the one step that needs it" >&2
+    exit 1
+fi
+repo=$(dirname "$(dirname "$(readlink -f "$0")")")
+python="$repo/.venv/bin/python"
+if [ ! -x "$python" ]; then
+    echo "install-agent: $python is missing; run 'uv sync' in $repo first" >&2
+    exit 1
+fi
+operator=$(id -un)
+unit="neonwatch-agent@$operator.service"
+
+echo "== building the bundle (as $operator)"
+"$python" "$repo/tools/services.py" bundle
+echo "== installing it into /opt/neonwatch (sudo)"
+sudo /usr/bin/python3 -I "$repo/tools/services.py" install-agent --operator "$operator"
+if ! systemctl is-active --quiet "$unit"; then
+    echo "== starting $unit (sudo)"
+    sudo systemctl start "$unit"
+fi
+systemctl status --no-pager --lines=5 "$unit"
+echo "== installed: follow it with  journalctl -u $unit -f"

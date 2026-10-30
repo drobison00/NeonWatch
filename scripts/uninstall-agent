@@ -1,0 +1,15 @@
+#!/bin/sh
+# Remove the root agent's system service, as yourself:  scripts/uninstall-agent
+#
+# Asks sudo to run tools/services.py uninstall-agent with the system python, isolated: it stops
+# and disables every neonwatch-agent@ instance, and removes the unit and /opt/neonwatch (and
+# its .old and .new). Your config and state in your home are left as they are.
+set -eu
+if [ "$(id -u)" -eq 0 ]; then
+    echo "uninstall-agent: run this as yourself, not as root; it asks sudo for the one step that needs it" >&2
+    exit 1
+fi
+repo=$(dirname "$(dirname "$(readlink -f "$0")")")
+echo "== removing the agent's system service and /opt/neonwatch (sudo)"
+sudo /usr/bin/python3 -I "$repo/tools/services.py" uninstall-agent
+echo "== removed. To run the agent by hand instead:  sudo $repo/scripts/neonwatch-agent"
