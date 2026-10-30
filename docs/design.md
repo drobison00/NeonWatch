@@ -344,6 +344,38 @@ Still to build:
   fallback.
 - **An install for the app:** a desktop entry, icons, the `neonwatch://` handler and autostart.
 
+## Models set from the dashboard (feature, 2026-10-30)
+
+The **Models** tab sets which judge and which analyst the service calls, and their keys, while it
+runs. Decided with the operator:
+
+- **Keys live in a separate file** (`secrets.json`), never in `config.toml`.
+- **The dashboard changes them from loopback only**, never in LAN mode.
+- **Nothing forces a restart:** a change only alters which models are called.
+
+How it holds:
+
+- **`models` (level 2, on `config` alone)** owns `models.json` (an overlay on `[judge]` name, url
+  and model, and `[analyst]` provider, base_url, model, reach and reasoning_effort) and
+  `secrets.json`, beside the config file. Both are 0600, read as carefully as the config,
+  written staged and renamed. `config.toml` is never written.
+- **One set of rules.** `check_judge` (the name rule and `judge_url_problem`) and `check_analyst` (with
+  `keyed` passed in, since a key may now come from the secrets file) are the config's own. The
+  judge's transport uses `judge_url_problem` too, and loading `config.toml` applies it, so a
+  remote judge is refused at load, not at its first request. A change is checked whole: one bad field and nothing is written.
+- **Applied live:**
+  - `Judge.retarget` swaps the judge's transport and settings, with requests in flight finishing
+    where they were sent, and resets the health;
+  - the web layer swaps its analyst and model config, with a running job keeping its own;
+  - the service's `models_changed` does both.
+- **System 1 stays on this machine.** It is sent redacted host state at every collation, so the
+  tab sets its name, loopback URL, model and an optional bearer key, never a remote host. Pointing it
+  elsewhere is a change to the security model, not a setting.
+- **The API.** `GET`/`POST /api/models` are session-only. The agent API and MCP cannot reach
+  them. The POST needs the CSRF token and Origin, a loopback listener and a loopback peer. Keys
+  are write-only, and the audit log records `set` or `removed`, never a value.
+- **Startup never fails on it.** An unusable file or overlay is logged, and `config.toml` applies.
+
 ## Correlation: linking related measures (feature, 2026-09-30)
 
 A second pass after each collation groups findings and issues that are probably one problem, so the

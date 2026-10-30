@@ -369,6 +369,13 @@ copy rather than link. An unknown section or key stops every command that reads 
 with an error that names it. The processes read the file when they start, so restart them after an edit.
 [`docs/configuration.md`](docs/configuration.md) documents every key.
 
+**The two models need no restart.** The dashboard's **Models** tab sets which judge and which
+analyst LLM the service calls, and their keys, and applies a change at once. It writes over
+`config.toml` without touching it, and keeps keys in a separate file only you can read. It works
+from this machine's own dashboard only, never in LAN mode.
+
+![The Models tab](docs/images/models-panel.png)
+
 ### The two models
 
 NeonWatch can use two optional models. The **judge** is a fast "System 1" classifier, asked

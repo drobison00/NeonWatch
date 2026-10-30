@@ -16,7 +16,9 @@ Rules that apply to the whole file:
 - **A regular file you own.** It must be owned by you (or root), not a symlink, at most 64 KiB, and
   UTF-8. A dotfile manager that links the file in is refused: copy it instead.
 - **Read at start.** The broker, the service and the agent each read it once when they start.
-  Restart whichever you changed it for.
+  Restart whichever you changed it for. The exception is the two models: the dashboard's
+  **Models** tab sets them while the service runs, over this file and without writing it (see
+  [Set from the dashboard](#set-from-the-dashboard-modelsjson-and-secretsjson)).
 - **Durations** (keys ending `_s`, and `[cadence]`) take seconds or a string such as `"90s"`,
   `"5m"`, `"12h"` or `"7d"`. **Sizes** (`retention.max_bytes`) take bytes or a string such as
   `"500MiB"` or `"10GiB"`.
@@ -35,7 +37,7 @@ dashboard's judge vital reads "unreachable".
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `name` | `"Judge"` | What the dashboard and the APIs call this judge. 1-40 characters: letters, digits, spaces and `. _ - + / ( )`, starting with a letter or digit. |
-| `url` | `"http://127.0.0.1:8200/v1/systemone"` | Where requests go. Plain `http://` to a loopback address only; proxies and redirects are ignored. Checked when the service starts. |
+| `url` | `"http://127.0.0.1:8200/v1/systemone"` | Where requests go. Plain `http://` to a loopback address only; proxies and redirects are ignored. Checked when the config is loaded. |
 | `model` | `"judge"` | Sent in every request, for a server that hosts several models. A server may ignore it. |
 | `concurrency` | `2` | Requests in flight at once, 1-16. A server that answers serially gains nothing past 2. |
 | `max_questions_per_request` | `24` | Questions packed into one request. |
@@ -75,7 +77,7 @@ the agent API skip that confirmation** (see [`agent-api.md`](agent-api.md)).
 | `provider` | `""` | `""` (off), `"openai-compatible"` or `"anthropic"`. |
 | `base_url` | `""` | Required for openai-compatible: the base that `/chat/completions` hangs off, e.g. `http://127.0.0.1:8000/v1`. For anthropic, empty means `https://api.anthropic.com`. |
 | `model` | `""` | Required once `provider` is set. |
-| `api_key_env` | `""` | The **name** of an environment variable holding the key, never the key itself (a value that looks like a key is refused). The variable must be set in the service's environment when it starts; otherwise the service logs `analyst disabled: …` and runs without an analyst. |
+| `api_key_env` | `""` | The **name** of an environment variable holding the key, never the key itself (a value that looks like a key is refused). The variable must be set in the service's environment when it starts. A key set from the dashboard wins over it. With neither, the service logs `analyst disabled: …` and runs without an analyst. |
 | `reach` | `"local"` | How far a request may go: `"local"` (loopback only), `"lan"` (also private and link-local addresses) or `"remote"` (anywhere). A non-loopback endpoint needs https, except a keyless LAN one. Anthropic's API is remote, so it needs `reach = "remote"`. |
 | `reasoning_effort` | `""` | openai-compatible only: `"low"`, `"medium"` or `"high"`, sent as `reasoning_effort`. |
 | `max_input_chars` | `60000` | Characters of redacted context per request. |
@@ -147,3 +149,35 @@ spends root's CPU.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `path` | `"~/.local/state/neonwatch/store.sqlite3"` | The dashboard's database (0600). |
+
+## Set from the dashboard: `models.json` and `secrets.json`
+
+The dashboard's **Models** tab (`#/view/models`) sets which models the service calls, and their
+keys, while it runs:
+
+![The Models tab: System 1 (the judge) and the analyst, each field saying where its value comes from](images/models-panel.png)
+
+| What | Set from the dashboard | Stays in `config.toml` only |
+| --- | --- | --- |
+| `[judge]` | `name`, `url`, `model`, a key | `concurrency`, `max_questions_per_request`, `max_state_chars`, `timeout_s` |
+| `[analyst]` | `provider`, `base_url`, `model`, `reach`, `reasoning_effort`, a key | `api_key_env`, `max_input_chars`, `max_output_tokens`, `timeout_s` |
+
+- **Where it is kept.** Beside the config file (`~/.config/neonwatch/` by default):
+  `models.json` holds the choices and `secrets.json` the keys. Both are 0600 and written whole
+  (staged, then renamed). Both are read as carefully as `config.toml`: your own regular file, not
+  a symlink, nothing for group or others. One that fails those checks is left out, with a warning
+  in the service's log, and `config.toml` applies.
+- **Which wins.** A field set from the dashboard wins over `config.toml`, and only fields that
+  differ from it are kept. **Revert to config.toml** removes that form's choices; keys are
+  separate, with their own **Remove key**. The analyst's key is the dashboard's, else the one
+  `api_key_env` names. The judge's key, for a local server that wants one, is sent as a bearer token.
+- **Checked whole, applied at once.** A change goes through the same rules as this file.
+  The judge stays plain `http://` to loopback. The analyst keeps its `reach` rules, and a key forbids
+  plain http beyond loopback. Anything refused changes nothing, and the dashboard shows why. An
+  accepted change needs no restart: The judge is asked from the next collation, the analyst from the
+  next job (one already running finishes on the old settings).
+- **Keys are write-only.** Once set, a key is never shown or returned: the tab says only whether
+  one is set and where it comes from. The audit log records that a key was set or removed, never
+  its value.
+- **From this machine only.** The tab changes anything only when the dashboard listens on loopback
+  and the request comes from loopback. In LAN mode it is read-only, and says so.

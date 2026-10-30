@@ -22,6 +22,26 @@ second kind: an occasional, open question about a handful of issues, answered in
 Only the unprivileged service talks to either model, and it redacts everything it sends. The
 root agent has no model client at all.
 
+## Setting them from the dashboard
+
+Both can be set in `config.toml` (below), or in the dashboard's **Models** tab. The tab applies a
+change at once, with no restart, and keeps keys in a separate file only you can read:
+
+![The Models tab: System 1 (the judge) and the analyst LLM, each with its fields, where each value comes from, and its key](images/models-panel.png)
+
+- **Where values come from.** Every field says whether it was set here, comes from
+  `config.toml`, or is the default. An edited field says it is not saved yet.
+- **Keys** are set by pasting into the key field. They are never shown again, only whether one is
+  set and where from.
+- **One form per model.** Each has **Save**, and **Revert to config.toml** once it has been
+  changed here.
+- **What may be set** is checked whole by the same rules as `config.toml`. The judge stays on this
+  machine, and the analyst keeps its `reach`. A refusal says why and changes nothing.
+- **Only from this machine's own dashboard**, never in LAN mode.
+
+The details, and the two files it keeps, are in
+[`configuration.md`](configuration.md#set-from-the-dashboard-modelsjson-and-secretsjson).
+
 ## The judge
 
 ### What it does
