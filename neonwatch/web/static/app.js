@@ -116,7 +116,7 @@
     view: "layout", // the shown view: layout (attention), sched, svc, logs or board
   };
 
-  const VIEWS = ["layout", "sched", "svc", "logs", "board"];
+  const VIEWS = ["layout", "sched", "svc", "logs", "board", "models"];
   const now = () => Date.now() / 1000 + state.offset;
   const $ = (id) => document.getElementById(id);
 
@@ -2241,6 +2241,7 @@
     for (const id of VIEWS) $(id).hidden = id !== view;
     if (LISTS[view] && LISTS[view].stale) loadList(view);
     if (view === "board") renderBoard();
+    if (view === "models") loadModels();
   }
 
   function findListed(subject) {
@@ -2251,11 +2252,140 @@
     return "";
   }
 
+  // --- the Models view: which models NeonWatch calls -------------------------------------------
+  // Two forms, one per section of /api/models. Each field says where its value comes from; a key
+  // is never shown, only whether one is set and from where. A save sends that form's fields (and
+  // a key typed into it); the server keeps only what differs from config.toml and applies it at
+  // once. Beyond loopback the server says why the view is read-only, and every control is off.
+  const PROVIDER_LABELS = { "": "Off", "openai-compatible": "OpenAI-compatible", anthropic: "Anthropic" };
+  const EFFORT_LABELS = { "": "the model's default", low: "low", medium: "medium", high: "high" };
+  const REACH_NOTES = {
+    local: "Local: loopback only. Nothing leaves this machine.",
+    lan: "LAN: also private and link-local IP addresses (not names). Plain http only without a key.",
+    remote: "Remote: anywhere, over https. Each analysis still waits for the estimate you confirm.",
+  };
+  const SOURCE_LABELS = { dashboard: "set here", "config.toml": "from config.toml", default: "default" };
+  const MODEL_FIELDS = { judge: ["name", "url", "model"], analyst: ["provider", "base_url", "model", "reach", "reasoning_effort"] };
+
+  async function loadModels() {
+    try {
+      state.models = await api("/api/models");
+      $("models-asof").textContent = "";
+    } catch (e) {
+      state.models = null;
+      $("models-asof").textContent = e.status === 503 ? "This service has no Models view." : `Not loaded: ${e.reason || e.message}`;
+    }
+    renderModels();
+  }
+
+  function fillSelect(select, values, labels) {
+    if (select.options.length === values.length) return;
+    select.replaceChildren(...values.map((v) => el("option", { value: v, text: labels[v] || v })));
+  }
+
+  function renderModels() {
+    const m = state.models;
+    for (const section of Object.keys(MODEL_FIELDS)) {
+      const form = $(`m-${section}`);
+      for (const c of form.querySelectorAll("input, select, button")) c.disabled = !m || !m.editable;
+      if (!m) continue;
+      const data = m[section];
+      if (section === "analyst") {
+        fillSelect(form.elements.provider, m.choices.provider, PROVIDER_LABELS);
+        fillSelect(form.elements.reach, m.choices.reach, {});
+        fillSelect(form.elements.reasoning_effort, m.choices.reasoning_effort, EFFORT_LABELS);
+      }
+      for (const name of MODEL_FIELDS[section]) {
+        const f = data.fields[name];
+        if (document.activeElement !== form.elements[name]) form.elements[name].value = f.value;
+        const source = form.querySelector(`.source[data-for="${name}"]`);
+        source.textContent = SOURCE_LABELS[f.source] || f.source;
+        source.classList.toggle("set-here", f.source === "dashboard");
+        source.classList.remove("unsaved");
+      }
+      const key = data.key;
+      $(`m-${section}-key-state`).textContent = key.set
+        ? (key.source === "environment" ? `Set, from $${key.env}` : "Set here")
+        : (key.env ? `Not set: config.toml names $${key.env}, which the service's environment lacks` : "Not set");
+      form.querySelector(".key-remove").hidden = !(key.set && key.source === "dashboard");
+      form.querySelector(".revert").hidden = !data.overridden;
+    }
+    if (!m) return;
+    $("models-readonly").hidden = m.editable;
+    $("models-readonly").textContent = m.editable ? "" : `Read-only: ${m.why_not}.`;
+    $("models-files").textContent = `Set here: ${m.files.settings} (models) and ${m.files.secrets} (keys), both readable by you alone.`;
+    updateAnalystForm();
+    renderModelStatus();
+  }
+
+  // What the analyst form shows depends on its own choices: the base URL's default, the reach's
+  // meaning, and reasoning effort for an OpenAI-compatible provider only.
+  function updateAnalystForm() {
+    const form = $("m-analyst");
+    const provider = form.elements.provider.value;
+    form.elements.base_url.placeholder = provider === "anthropic" ? "https://api.anthropic.com (the default)" : provider ? "http://127.0.0.1:8888/v1" : "";
+    $("m-reach-note").textContent = REACH_NOTES[form.elements.reach.value] || "";
+    $("m-effort-field").hidden = provider !== "openai-compatible";
+  }
+
+  function renderModelStatus() {
+    const h = state.health;
+    if (!h) return;
+    const e = h.judge;
+    $("m-judge-status").textContent = !e ? "" : e.reachable === null ? "not asked yet"
+      : e.reachable ? `reachable${e.p50_ms != null ? `, p50 ${Math.round(e.p50_ms)} ms` : ""}` : `unreachable${e.last_error ? `: ${e.last_error}` : ""}`;
+    $("m-analyst-status").textContent = h.analyst && h.analyst.configured ? `in use: ${h.analyst.model}` : "off";
+  }
+
+  async function saveModels(form, change, what) {
+    const error = form.querySelector(".model-error");
+    const saved = form.querySelector(".model-saved");
+    error.hidden = true;
+    saved.textContent = "Saving…";
+    for (const b of form.querySelectorAll("button")) b.disabled = true;
+    try {
+      state.models = await api("/api/models", { post: true, body: change });
+      form.elements.key.value = "";
+      saved.textContent = `${what} at ${new Date().toLocaleTimeString()}; in use now.`;
+      renderModels();
+      loadHealth();
+    } catch (e) {
+      // Refused: nothing changed on the server, and what was typed stays to be corrected.
+      saved.textContent = "";
+      error.textContent = e.reason || e.message;
+      error.hidden = false;
+      for (const b of form.querySelectorAll("button")) b.disabled = !state.models || !state.models.editable;
+    }
+  }
+
+  function wireModels() {
+    for (const section of Object.keys(MODEL_FIELDS)) {
+      const form = $(`m-${section}`);
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const change = { [section]: Object.fromEntries(MODEL_FIELDS[section].map((n) => [n, form.elements[n].value])) };
+        const key = form.elements.key.value.trim();
+        if (key) change.keys = { [section]: key };
+        saveModels(form, change, "Saved");
+      });
+      form.querySelector(".revert").addEventListener("click", () => saveModels(form, { [section]: null }, "Reverted to config.toml"));
+      form.querySelector(".key-remove").addEventListener("click", () => saveModels(form, { keys: { [section]: "" } }, "Key removed"));
+      // A field edited since the last save says so, until a save succeeds.
+      form.addEventListener("input", (event) => {
+        const source = form.querySelector(`.source[data-for="${event.target.name}"]`);
+        if (!source) return;
+        source.textContent = "changed, not saved";
+        source.classList.add("unsaved");
+      });
+    }
+    for (const name of ["provider", "reach"]) $("m-analyst").elements[name].addEventListener("change", updateAnalystForm);
+  }
+
   // --- addresses ------------------------------------------------------------------------------
   // `#/view/<name>` opens a view and `#/issues/<id>` one issue, so a link, a notification or the
   // desktop app can point here, and back and forward move between them. The fragment survives
   // the `/?token=` sign-in redirect, since the server never sees it.
-  const VIEW_NAMES = { attention: "layout", scheduled: "sched", services: "svc", logs: "logs", board: "board" };
+  const VIEW_NAMES = { attention: "layout", scheduled: "sched", services: "svc", logs: "logs", board: "board", models: "models" };
   const NAME_OF = Object.fromEntries(Object.entries(VIEW_NAMES).map(([name, view]) => [view, name]));
   const ISSUE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 
@@ -2845,6 +2975,7 @@
     } catch (e) {
       reportError("health", e);
     }
+    if (state.view === "models") renderModelStatus();
     updateExplainButton();
     updateDescribeButton();
     scheduleRender();
@@ -2990,6 +3121,7 @@
     for (const id of ["sched-source", "sched-user", "sched-unread", "sched-ignored", "sched-text"]) $(id).addEventListener("input", () => renderList("sched"));
     for (const id of ["svc-failed", "svc-restarting", "svc-root", "svc-undescribed", "svc-text"]) $(id).addEventListener("input", () => renderList("svc"));
     $("logs-load").addEventListener("click", loadLogs);
+    wireModels();
     $("logs-priority").addEventListener("input", renderLogs);
     $("logs-explain").addEventListener("click", openExplain);
     $("lx-confirm").addEventListener("click", () => confirmExplain("lx"));

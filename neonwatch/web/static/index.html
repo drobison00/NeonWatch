@@ -16,6 +16,7 @@
     <button type="button" class="view-tab" data-view="svc" aria-pressed="false">Services<span id="svc-badge" class="tab-badge" hidden></span></button>
     <button type="button" class="view-tab" data-view="logs" aria-pressed="false">Logs</button>
     <button type="button" class="view-tab" data-view="board" aria-pressed="false">Board</button>
+    <button type="button" class="view-tab" data-view="models" aria-pressed="false">Models</button>
   </nav>
   <dl class="vitals" id="vitals">
     <div class="vital" id="v-agent"><dt>Agent</dt><dd>…</dd></div>
@@ -187,6 +188,57 @@
       <section id="board-detail" class="panel board-detail" aria-live="polite"></section>
     </aside>
   </div>
+</section>
+
+<section id="models" class="listview" aria-labelledby="h-models" hidden>
+  <div class="section-head">
+    <h2 id="h-models">Models</h2>
+    <p id="models-asof" class="counts muted"></p>
+  </div>
+  <p id="models-readonly" class="models-readonly" role="note" hidden></p>
+  <p class="fact-note">What NeonWatch calls out to. A change applies at once, with no restart: the judge from the next collation, the analyst from the next job. Values set here sit over <code>config.toml</code>, which is never written; keys go to a separate file only you can read.</p>
+  <div class="models-grid">
+    <form id="m-judge" class="panel model-card" data-section="judge" novalidate>
+      <div class="model-head"><h3>System 1 · Judge</h3><span id="m-judge-status" class="muted"></span></div>
+      <p class="fact-note">Answers the evaluator's typed questions at every collation. It is sent the host's redacted state, so it stays on this machine: plain <code>http://</code> to a loopback address.</p>
+      <label class="field"><span class="field-name">Name</span><span class="field-input"><input name="name" type="text" spellcheck="false" autocomplete="off" maxlength="40"></span><small class="source" data-for="name"></small></label>
+      <label class="field"><span class="field-name">URL</span><span class="field-input"><input name="url" type="text" inputmode="url" spellcheck="false" autocomplete="off"></span><small class="source" data-for="url"></small></label>
+      <label class="field"><span class="field-name">Model</span><span class="field-input"><input name="model" type="text" spellcheck="false" autocomplete="off"></span><small class="source" data-for="model"></small></label>
+      <div class="field key">
+        <span class="field-name">Key</span>
+        <span class="field-input">
+          <span id="m-judge-key-state" class="key-state"></span>
+          <input name="key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste a new key to set it" aria-label="New key">
+          <button type="button" class="key-remove" hidden>Remove key</button>
+        </span>
+        <small class="source">Kept in a file only you can read; never shown again once set.</small>
+      </div>
+      <p class="model-error" role="alert" hidden></p>
+      <div class="model-actions"><button type="submit" class="primary">Save</button><button type="button" class="revert" hidden>Revert to config.toml</button><span class="model-saved muted" aria-live="polite"></span></div>
+    </form>
+    <form id="m-analyst" class="panel model-card" data-section="analyst" novalidate>
+      <div class="model-head"><h3>Analyst LLM</h3><span id="m-analyst-status" class="muted"></span></div>
+      <p class="fact-note">Writes analyses and explanations when you ask, never on its own; nothing is sent until you confirm an estimate.</p>
+      <label class="field"><span class="field-name">Provider</span><span class="field-input"><select name="provider"></select></span><small class="source" data-for="provider"></small></label>
+      <label class="field"><span class="field-name">Base URL</span><span class="field-input"><input name="base_url" type="text" inputmode="url" spellcheck="false" autocomplete="off"></span><small class="source" data-for="base_url"></small></label>
+      <label class="field"><span class="field-name">Model</span><span class="field-input"><input name="model" type="text" spellcheck="false" autocomplete="off"></span><small class="source" data-for="model"></small></label>
+      <label class="field"><span class="field-name">Reach</span><span class="field-input"><select name="reach"></select></span><small class="source" data-for="reach"></small></label>
+      <p id="m-reach-note" class="fact-note reach-note"></p>
+      <label class="field" id="m-effort-field"><span class="field-name">Reasoning effort</span><span class="field-input"><select name="reasoning_effort"></select></span><small class="source" data-for="reasoning_effort"></small></label>
+      <div class="field key">
+        <span class="field-name">Key</span>
+        <span class="field-input">
+          <span id="m-analyst-key-state" class="key-state"></span>
+          <input name="key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste a new key to set it" aria-label="New key">
+          <button type="button" class="key-remove" hidden>Remove key</button>
+        </span>
+        <small class="source">Kept in a file only you can read; never shown again once set.</small>
+      </div>
+      <p class="model-error" role="alert" hidden></p>
+      <div class="model-actions"><button type="submit" class="primary">Save</button><button type="button" class="revert" hidden>Revert to config.toml</button><span class="model-saved muted" aria-live="polite"></span></div>
+    </form>
+  </div>
+  <p id="models-files" class="fact-note"></p>
 </section>
 
 <dialog id="lx-dialog" class="an-dialog" aria-labelledby="lx-title">
