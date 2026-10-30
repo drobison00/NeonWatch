@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import io
+import json
 import logging
 import os
 import re
@@ -83,6 +84,10 @@ FULL_DISK = {"filesystems": [{"mount": "/", "used_pct": 99.0, "source": "/dev/nv
 class FakeJudge:
     def __init__(self) -> None:
         self.asked = 0
+        self.retargeted: list = []
+
+    def retarget(self, post, server) -> None:
+        self.retargeted.append((post, server))
 
     async def attest(self, contexts):
         self.asked += len(contexts)
@@ -925,10 +930,94 @@ def test_sigterm_stops_the_service_cleanly(monkeypatch):
 
     async def opened(config, **kw):
         seen["environ"], seen["owner"] = kw["environ"], kw["owner"]
+        seen["models_dir"] = kw["models_dir"]
         return Running()
     monkeypatch.setattr(service, "open_service", opened)
+    monkeypatch.setattr(service.Path, "home", lambda: Path("/home/alice"))
     assert service.main([], uid=1000, environ={"A": "1"}) == 0
-    assert seen == {"stopped": True, "environ": {"A": "1"}, "owner": 1000}
+    assert seen == {"stopped": True, "environ": {"A": "1"}, "owner": 1000,
+                    "models_dir": Path("/home/alice/.config/neonwatch")}
+
+
+# --- the models the dashboard sets ------------------------------------------------------------
+
+LOCAL_LLM = {"provider": "openai-compatible", "base_url": "http://127.0.0.1:8888/v1",
+             "model": "qwen"}
+
+
+def private_json(path: Path, data) -> None:
+    path.write_text(json.dumps(data))
+    path.chmod(0o600)
+
+
+async def test_the_service_starts_on_the_dashboards_models_and_keys(monkeypatch, tmp_path):
+    config = web_config(tmp_path)
+    private_json(tmp_path / "models.json", {"analyst": LOCAL_LLM, "judge": {"model": "e2"}})
+    private_json(tmp_path / "secrets.json", {"analyst": "sk-dash"})
+    fake_connect(monkeypatch, [])
+    svc = await service.open_service(config, environ={}, judge=FakeJudge(),
+                                     models_dir=tmp_path)
+    try:
+        assert svc.models is not None and svc.models.keys.analyst == "sk-dash"
+        assert svc.analyst is not None and svc._config.judge.model == "e2"
+        assert "sk-dash" not in repr(svc.analyst)
+    finally:
+        await svc.close()
+
+
+async def test_an_unusable_overlay_is_logged_and_the_config_applies(monkeypatch, tmp_path, caplog):
+    config = web_config(tmp_path)
+    private_json(tmp_path / "models.json", {"judge": {"url": "http://10.0.0.9:8200/"}})
+    fake_connect(monkeypatch, [])
+    with caplog.at_level(logging.WARNING):
+        svc = await service.open_service(config, environ={}, judge=FakeJudge(),
+                                         models_dir=tmp_path)
+    try:
+        assert svc._config.judge == config.judge and svc.analyst is None
+        assert "must be loopback" in caplog.text and "config.toml applies instead" in caplog.text
+    finally:
+        await svc.close()
+
+
+async def test_without_a_models_directory_the_view_is_off(monkeypatch, tmp_path):
+    fake_connect(monkeypatch, [])
+    svc = await service.open_service(web_config(tmp_path), environ={}, judge=FakeJudge())
+    try:
+        assert svc.models is None
+    finally:
+        await svc.close()
+
+
+async def test_a_change_retargets_the_judge_and_rebuilds_the_analyst_without_a_restart(
+        monkeypatch, tmp_path):
+    fake_connect(monkeypatch, [])
+    judge = FakeJudge()
+    svc = await service.open_service(web_config(tmp_path), environ={"MY_KEY": "env-k"},
+                                     judge=judge, models_dir=tmp_path)
+    try:
+        config, analyst = svc.models.save({
+            "judge": {"url": "http://127.0.0.1:8201/v1/systemone", "model": "e3"},
+            "analyst": LOCAL_LLM, "keys": {"judge": "ek"}})
+        assert analyst is svc.analyst and analyst is not None
+        ((_, server),) = judge.retargeted
+        assert server.url == "http://127.0.0.1:8201/v1/systemone" and server.model == "e3"
+        assert svc._config is config
+        _, off = svc.models.save({"analyst": None})
+        assert off is None and svc.analyst is None
+    finally:
+        await svc.close()
+
+
+def test_the_analyst_key_comes_from_the_dashboard_before_the_environment(caplog):
+    from neonwatch.models import Keys
+    named = Config(analyst=dataclasses.replace(Config().analyst, provider="openai-compatible",
+                                               model="m", base_url="http://127.0.0.1:1/v1",
+                                               api_key_env="MY_KEY"))
+    assert service._analyst(named, Keys(analyst="dash"), {}) is not None
+    assert service._analyst(named, Keys(), {"MY_KEY": "env"}) is not None
+    with caplog.at_level(logging.WARNING):
+        assert service._analyst(named, Keys(), {}) is None
+    assert "no key is set from the dashboard" in caplog.text
 
 
 def test_the_config_is_read_with_the_services_own_uid_as_owner(monkeypatch, tmp_path):

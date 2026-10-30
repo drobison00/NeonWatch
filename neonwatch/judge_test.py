@@ -124,6 +124,17 @@ PROCESSES = bank_for(ContextKind.PROCESSES)
 # --- packing -------------------------------------------------------------------------------------
 
 
+async def test_a_retargeted_judge_asks_the_new_server_and_its_health_starts_over() -> None:
+    old, new = Fake(), Fake()
+    judge = Judge(old, config())
+    await judge.attest([context()])
+    assert judge.health().reachable is True and judge.health().p50_ms is not None
+    judge.retarget(new, dataclasses.replace(JudgeServer(), model="judge-2"))
+    assert judge.health().reachable is None and judge.health().p50_ms is None
+    await judge.attest([context()])
+    assert len(old.bodies) == 1 and {b["model"] for b in new.bodies} == {"judge-2"}
+
+
 async def test_one_context_packs_into_one_request_when_it_fits() -> None:
     fake = Fake()
     out = await Judge(fake, config()).attest([context()])
@@ -943,6 +954,14 @@ async def test_the_real_client_posts_json_and_returns_the_reply(serve) -> None:
     assert headers["Content-Type"] == "application/json"
     assert json.loads(data) == body
     assert list(json.loads(data)["questions"]) == ["b", "a"]  # order kept: reversal rides on it
+
+
+async def test_a_key_goes_as_a_bearer_token_and_none_sends_no_authorization(serve) -> None:
+    server = serve(lambda path, data: (200, b'{"answers": {}}', {}))
+    await urllib_transport(server.url, 5.0, "local-key")({})
+    await urllib_transport(server.url, 5.0)({})
+    assert server.seen[0][1]["Authorization"] == "Bearer local-key"
+    assert "Authorization" not in server.seen[1][1]
 
 
 @pytest.mark.parametrize("status, payload, headers", [

@@ -12,6 +12,7 @@ import contextlib
 import dataclasses
 import json
 import logging
+import os
 import re
 import shutil
 import socket
@@ -31,6 +32,7 @@ from neonwatch.analyst import Analyst, LogExplained, ServicesDescribed, ServiceT
 from neonwatch.config import Analyst as AnalystConfig
 from neonwatch.config import Cadence, Config, Retention, Web, load
 from neonwatch.logs import JournalRead, parse_line
+from neonwatch.models import Models
 from neonwatch.probes import CATALOG
 from neonwatch.schema import (
     Analysis,
@@ -3118,3 +3120,104 @@ async def test_a_running_describe_shows_progress_and_keeps_each_batch(
         done = await wait_described(h, job)
     assert done["status"] == "done" and done["described"] == 2
     assert set(h.store.described) == {"foo.service", "apt-daily.service"}
+
+
+# --- the Models view -----------------------------------------------------------------------------
+
+LOCAL_LLM = {"provider": "openai-compatible", "base_url": "http://127.0.0.1:8888/v1",
+             "model": "qwen", "reach": "local", "reasoning_effort": ""}
+
+
+def models_in(tmp_path: Path) -> tuple[Models, list]:
+    """Models whose apply callback stands in for the service's: it records the change and gives
+    the dashboard a FakeAnalyst when one is configured."""
+    applied: list = []
+
+    def apply(config, keys):
+        applied.append((config, keys))
+        return FakeAnalyst() if config.analyst.provider else None
+    return Models(Config(), tmp_path, os.getuid(), {}, apply), applied
+
+
+async def test_without_models_the_view_answers_503() -> None:
+    async with serve() as h:
+        resp = await h.get("/api/models")
+        assert resp.status == 503 and "off" in (await resp.json())["error"]
+        assert (await h.post("/api/models", {})).status == 503
+
+
+async def test_the_view_shows_each_model_and_is_editable_from_this_machine(tmp_path) -> None:
+    models, _ = models_in(tmp_path)
+    async with serve(models=models) as h:
+        view = await (await h.get("/api/models")).json()
+        assert view["editable"] is True and view["why_not"] == ""
+        assert view["judge"]["fields"]["url"]["source"] == "default"
+        assert view["analyst"]["key"] == {"set": False, "source": None, "env": ""}
+
+
+async def test_a_change_from_the_dashboard_applies_at_once_and_is_audited_without_the_key(
+        tmp_path) -> None:
+    models, applied = models_in(tmp_path)
+    store = FakeStore()
+    async with serve(store, models=models) as h:
+        assert (await (await h.get("/api/health")).json())["analyst"]["configured"] is False
+        resp = await h.post("/api/models", {"analyst": LOCAL_LLM, "keys": {"analyst": "sk-xyz"}})
+        assert resp.status == 200, await resp.text()
+        view = await resp.json()
+        assert view["analyst"]["fields"]["model"] == {"value": "qwen", "source": "dashboard"}
+        assert view["analyst"]["key"]["set"] is True
+        health = await (await h.get("/api/health")).json()
+        assert health["analyst"] == {"configured": True, "provider": "openai-compatible",
+                                     "model": "qwen"}
+        assert len(applied) == 1
+        (row,) = store.audit_rows
+        assert (row.agent, row.action) == ("operator", "models")
+        assert row.detail == {"sections": ["analyst"], "reverted": [],
+                              "keys": {"analyst": "set"}}
+        assert "sk-xyz" not in json.dumps(row.detail) and "sk-xyz" not in json.dumps(view)
+
+
+async def test_a_refused_change_is_400_and_changes_nothing(tmp_path) -> None:
+    models, applied = models_in(tmp_path)
+    store = FakeStore()
+    async with serve(store, models=models) as h:
+        remote_http = dict(LOCAL_LLM, base_url="http://llm.example.com/v1", reach="remote")
+        resp = await h.post("/api/models", {"analyst": remote_http})
+        assert resp.status == 400 and "https" in (await resp.json())["error"]
+        resp = await h.post("/api/models", {"web": {"host": "0.0.0.0"}})
+        assert resp.status == 400 and "unexpected field" in (await resp.json())["error"]
+        assert applied == [] and store.audit_rows == [] and list(tmp_path.iterdir()) == []
+
+
+async def test_a_change_needs_the_csrf_token(tmp_path) -> None:
+    models, applied = models_in(tmp_path)
+    async with serve(models=models) as h:
+        resp = await h.post("/api/models", {"keys": {"analyst": "k"}},
+                            headers={**AUTH, "Origin": h.origin})
+        assert resp.status == 403 and applied == []
+
+
+@pytest.mark.parametrize("patch, why", [
+    ("_loopback_host", "LAN mode"),
+    ("loopback_peer", "does not come from this machine"),
+])
+async def test_beyond_loopback_the_models_are_read_only(tmp_path, monkeypatch, patch,
+                                                        why) -> None:
+    models, applied = models_in(tmp_path)
+    if patch == "_loopback_host":
+        monkeypatch.setattr(web_app, "_loopback_host", lambda host: False)
+    else:
+        monkeypatch.setattr(web_app.agent, "loopback_peer", lambda remote: False)
+    async with serve(models=models) as h:
+        view = await (await h.get("/api/models")).json()
+        assert view["editable"] is False and why in view["why_not"]
+        resp = await h.post("/api/models", {"keys": {"analyst": "k"}})
+        assert resp.status == 403 and why in (await resp.json())["error"]
+        assert applied == []
+
+
+def test_loopback_hosts_are_the_loopback_addresses_and_localhost() -> None:
+    assert web_app._loopback_host("127.0.0.1") and web_app._loopback_host("::1")
+    assert web_app._loopback_host("localhost")
+    assert not web_app._loopback_host("0.0.0.0") and not web_app._loopback_host("192.168.1.5")
+    assert not web_app._loopback_host("monitor.lan")

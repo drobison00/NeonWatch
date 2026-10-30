@@ -115,6 +115,7 @@ from neonwatch import jobs
 from neonwatch.analyst import AnalysisRequest, LogTemplate, ServiceUnit
 from neonwatch.config import Config
 from neonwatch.logs import JournalRead
+from neonwatch.models import Models, ModelsError
 from neonwatch.probes import CATALOG, ProbeSpec
 from neonwatch.schema import (
     Analysis,
@@ -321,7 +322,7 @@ LOGIN_LIMITED = "Too many failed attempts. Try again in a few minutes."
 def make_app(store: Store, live: Live, token: str, config: Config, analyst: Any = None, *,
              judge_health: Callable[[], Awaitable[Mapping[str, Any]]] | None = None,
              read_logs: Callable[[], Awaitable[JournalRead]] | None = None,
-             agent_token: Callable[[], str] | None = None,
+             agent_token: Callable[[], str] | None = None, models: Models | None = None,
              clock: Callable[[], float] = time.time, keepalive_s: float = KEEPALIVE_S,
              static_dir: Path = STATIC, queue_size: int = QUEUE_SIZE) -> web.Application:
     """The application. Binding it (to `config.web.host`, `config.web.port`) is the caller's job.
@@ -332,12 +333,13 @@ def make_app(store: Store, live: Live, token: str, config: Config, analyst: Any 
     `read_logs` reads the journal for `/api/logs`; without it that route answers 503. With
     `config.web.password_hash` set, `token` is ignored (and may be empty): the login replaces it.
     `agent_token` returns the agent API's token (it may raise when the file is unusable); it is
-    called for every agent request, and without it the agent API answers 503.
+    called for every agent request, and without it the agent API answers 503. `models` is what
+    the Models view reads and changes; without it `/api/models` answers 503.
     """
     if not token and not config.web.password_hash:
         raise ValueError("the per-launch token must not be empty")
     return _Web(store, live, token, config, analyst, judge_health, read_logs, clock,
-                keepalive_s, Path(static_dir), queue_size, agent_token).app
+                keepalive_s, Path(static_dir), queue_size, agent_token, models).app
 
 
 async def start(app: web.Application, host: str, port: int,
@@ -379,8 +381,10 @@ class _Web:
                  judge_health: Callable[[], Awaitable[Mapping[str, Any]]] | None,
                  read_logs: Callable[[], Awaitable[JournalRead]] | None,
                  clock: Callable[[], float], keepalive_s: float, static_dir: Path,
-                 queue_size: int, agent_token: Callable[[], str] | None = None) -> None:
+                 queue_size: int, agent_token: Callable[[], str] | None = None,
+                 models: Models | None = None) -> None:
         self.store = store
+        self.models = models
         self.live = live
         self.token = token.encode()
         self.csrf = secrets.token_urlsafe(32)
@@ -451,6 +455,8 @@ class _Web:
         r.add_post("/api/analyses", self.analyze)
         r.add_get("/api/analyses/{id}", self.analysis)
         r.add_get("/api/logs", self.logs)
+        r.add_get("/api/models", self.models_view)
+        r.add_post("/api/models", self.models_save)
         r.add_post("/api/logs/estimate", self.estimate_logs)
         r.add_post("/api/logs/explain", self.explain_logs)
         r.add_get("/api/logs/explain/{id}", self.log_job)
@@ -1017,6 +1023,50 @@ class _Web:
         if self.analyst is None:
             raise _Refused(503, "no analysis backend is configured")
         return self.analyst
+
+    # --- the Models view: which models are called, changed from this machine only -----------
+
+    def models_editable(self, request: web.Request) -> tuple[bool, str]:
+        """Whether this request may change the models, and why not. Only when the dashboard
+        listens on loopback and the request comes from it: a LAN dashboard shows them read-only."""
+        if not _loopback_host(self.config.web.host):
+            return False, ("the dashboard listens beyond loopback (LAN mode); models and keys "
+                           "are changed only from this machine's own dashboard")
+        if not agent.loopback_peer(request.remote):
+            return False, "this request does not come from this machine"
+        return True, ""
+
+    def need_models(self) -> Models:
+        if self.models is None:
+            raise _Refused(503, "the Models view is off in this service")
+        return self.models
+
+    async def models_view(self, request: web.Request) -> web.Response:
+        models = self.need_models()
+        editable, why_not = self.models_editable(request)
+        return _json(models.view(editable=editable, why_not=why_not))
+
+    async def models_save(self, request: web.Request) -> web.Response:
+        """Change the models, all of it or none, and apply it at once: the judge for the next
+        collation, the analyst for the next job (a running one keeps its own)."""
+        models = self.need_models()
+        editable, why_not = self.models_editable(request)
+        if not editable:
+            raise _Refused(403, why_not)
+        body = await _body(request, required=set(), optional={"judge", "analyst", "keys"})
+        try:
+            config, analyst = models.save(body)
+        except ModelsError as bad:
+            raise _Refused(400, str(bad)) from None
+        self.config = dataclasses.replace(self.config, judge=config.judge,
+                                          analyst=config.analyst)
+        self.analyst = analyst
+        keys = body.get("keys") if isinstance(body.get("keys"), dict) else {}
+        self.audit("operator", "models", "models", {
+            "sections": sorted(k for k in ("judge", "analyst") if k in body),
+            "reverted": sorted(k for k in ("judge", "analyst") if k in body and body[k] is None),
+            "keys": {k: "removed" if v == "" else "set" for k, v in keys.items()}})
+        return _json(models.view(editable=True))
 
     # --- the Logs view ----------------------------------------------------------------------
 
@@ -1736,6 +1786,14 @@ def _client_key(remote: str | None) -> str:
             return str(address.ipv4_mapped)
         return str(ipaddress.IPv6Network((int(address) >> 64 << 64, 64)))
     return str(address)
+
+
+def _loopback_host(host: str) -> bool:
+    """Whether the dashboard listens on loopback only (`web.host`)."""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
 
 
 def _origin(request: web.Request, host: str) -> str:

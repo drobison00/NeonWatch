@@ -8,7 +8,16 @@ import typing
 
 import pytest
 
-from neonwatch.config import MAX_CONFIG_BYTES, Config, ConfigError, creds_file, load
+from neonwatch.config import (
+    MAX_CONFIG_BYTES,
+    Analyst,
+    Config,
+    ConfigError,
+    check_analyst,
+    creds_file,
+    judge_url_problem,
+    load,
+)
 
 
 def written(tmp_path, text: str):
@@ -153,6 +162,39 @@ reasoning_effort = "low"
 def test_what_the_analyst_section_may_not_say_is_refused(tmp_path, text, message):
     with pytest.raises(ConfigError, match=message):
         load(written(tmp_path, text))
+
+
+def test_a_key_set_elsewhere_counts_as_keyed_for_the_analysts_endpoint():
+    # The dashboard keeps keys in a secrets file, so whether a key is sent is passed in, not
+    # read from api_key_env alone.
+    lan = Analyst(provider="openai-compatible", model="m", base_url="http://10.1.2.3/v1",
+                  reach="lan")
+    check_analyst(lan, keyed=False)
+    with pytest.raises(ConfigError, match="must use https"):
+        check_analyst(lan, keyed=True)
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8200/v1/systemone", "http://localhost:9000/x",
+                                 "http://[::1]:8200/"])
+def test_the_judge_is_plain_http_to_loopback(url):
+    assert judge_url_problem(url) == ""
+
+
+@pytest.mark.parametrize("url, why", [
+    ("https://127.0.0.1:8200/", "plain http"),
+    ("http://192.168.1.5:8200/", "must be loopback"),
+    ("http://judge.example.com/", "must be loopback"),
+    ("http://user:pw@127.0.0.1:8200/", "plain http"),
+    ("http://127.0.0.1:99999/", "invalid port"),
+    ("not a url", "plain http"),
+])
+def test_a_judge_anywhere_but_loopback_over_plain_http_is_refused(url, why):
+    assert why in judge_url_problem(url)
+
+
+def test_a_config_naming_a_remote_judge_is_refused_when_loaded(tmp_path):
+    with pytest.raises(ConfigError, match="must be loopback"):
+        load(written(tmp_path, '[judge]\nurl = "http://10.0.0.9:8200/v1/systemone"\n'))
 
 
 def test_a_missing_file_is_an_error_not_the_defaults(tmp_path):

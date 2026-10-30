@@ -772,6 +772,34 @@
         "MCP clients over stdio",
         "the dashboard's agent API over HTTP on loopback (client)"
       ]
+    },
+    {
+      "name": "models",
+      "responsibility": "Which models NeonWatch calls, as the operator sets them from the dashboard: an overlay on [judge] and [analyst] in models.json and the keys in secrets.json, both 0600 beside the config, read with the config loader's care and written staged and renamed. A change is checked whole by the config's own rules (check_analyst, judge_url_problem) before anything is written, then applied live through the service's callback. Keys are never logged or returned.",
+      "files": [
+        "neonwatch/models.py"
+      ],
+      "level": 2,
+      "public_interface": [
+        {
+          "name": "Models",
+          "signature": "Models(base: Config, where: Path, owner: int, environ: Mapping[str, str], apply: Callable[[Config, Keys], None])",
+          "returns": "the live setting: load() -> (Config, problems), view(editable, why_not) -> dict, save(change) -> Config (raises ModelsError)"
+        },
+        {
+          "name": "analyst_key",
+          "signature": "analyst_key(config: Config, keys: Keys, environ: Mapping[str, str]) -> str",
+          "returns": "the dashboard's key, else the api_key_env variable's"
+        },
+        {
+          "name": "write_private",
+          "signature": "write_private(where: Path, text: str) -> None",
+          "returns": "None (a 0600 file, staged and renamed)"
+        }
+      ],
+      "owns_adapter_to": [
+        "models.json and secrets.json beside the config file"
+      ]
     }
   ],
   "levels": [
@@ -870,6 +898,10 @@
     {
       "component": "mcp",
       "level": 3
+    },
+    {
+      "component": "models",
+      "level": 2
     }
   ],
   "level_1_depends_on_nothing_in_this_design": [
@@ -1173,6 +1205,18 @@
     {
       "component": "launcher",
       "depends_on": "mcp"
+    },
+    {
+      "component": "models",
+      "depends_on": "config"
+    },
+    {
+      "component": "web",
+      "depends_on": "models"
+    },
+    {
+      "component": "service",
+      "depends_on": "models"
     }
   ],
   "acyclic": true,

@@ -73,7 +73,6 @@ bank for.
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import json
 import math
 import shlex
@@ -84,10 +83,9 @@ from collections import deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit
 
 from neonwatch import redact
-from neonwatch.config import Config
+from neonwatch.config import Config, JudgeServer, judge_url_problem
 from neonwatch.questions import (
     Answer,
     AnswerError,
@@ -211,26 +209,22 @@ def _refuse_constant(name: str) -> Any:
     raise ValueError(f"{name} is not a number")
 
 
-def urllib_transport(url: str, timeout_s: float) -> Transport:
-    """The real transport: stdlib HTTP, in a thread, to a loopback `http://` URL only.
+def urllib_transport(url: str, timeout_s: float, key: str = "") -> Transport:
+    """The real transport: stdlib HTTP, in a thread, to a loopback `http://` URL only, with
+    `key` as a bearer token when one is set (a local server that wants one).
 
     Proxy settings in the environment are ignored, so a loopback URL stays on loopback.
     """
-    parts = urlsplit(url)
-    if parts.scheme != "http" or not parts.hostname or parts.username or parts.password:
-        raise ValueError(f"The judge URL must be plain http:// to a host, got {url!r}")
-    host = parts.hostname
-    try:
-        loopback = ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        loopback = host == "localhost"
-    if not loopback:
-        raise ValueError(f"The judge URL must be loopback, got {host!r}")
+    if problem := judge_url_problem(url):
+        raise ValueError(problem)
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
     def send(body: dict[str, Any]) -> dict[str, Any]:
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
         request = urllib.request.Request(url, data=dumps(body).encode(), method="POST",
-                                         headers={"Content-Type": "application/json"})
+                                         headers=headers)
         try:
             with opener.open(request, timeout=timeout_s) as response:
                 data = response.read(MAX_REPLY_BYTES + 1)
@@ -404,6 +398,14 @@ class Judge:
         prepared = [self._prepare(context) for context in contexts]
         per_context = await asyncio.gather(*(self._judge(p) for p in prepared))
         return tuple(a for attestations in per_context for a in attestations)
+
+    def retarget(self, post: Transport, server: JudgeServer) -> None:
+        """Ask a different judge from the next request on: `post`, and `server` for its name,
+        URL, model and limits (`concurrency` stays as built). Requests in flight finish where
+        they were sent; the health starts over, since it described the old one."""
+        self._post, self._server = post, server
+        self._latencies.clear()
+        self._reachable, self._last_error = None, ""
 
     def health(self) -> JudgeHealth:
         ordered = sorted(self._latencies)

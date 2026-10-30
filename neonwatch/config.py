@@ -366,25 +366,36 @@ def _principles(config: Config) -> None:
                               f"defers fast probes, so a smaller value spends CPU as root")
     if not 1 <= config.judge.concurrency <= 16:
         raise ConfigError("judge.concurrency must be 1-16")
-    if not _JUDGE_NAME.fullmatch(config.judge.name):
-        raise ConfigError("judge.name must be 1-40 characters: letters, digits, spaces and . _ - "
-                          "+ / ( ), starting with a letter or digit")
     if not 1 <= config.web.port <= 65535:
         raise ConfigError("web.port must be 1-65535")
-    _analyst(config.analyst)
+    check_judge(config.judge)
+    check_analyst(config.analyst, keyed=bool(config.analyst.api_key_env))
 
 
-_PROVIDERS = ("", "openai-compatible", "anthropic")
+PROVIDERS = ("", "openai-compatible", "anthropic")
 REACHES = ("local", "lan", "remote")
-_EFFORTS = ("", "low", "medium", "high")
+EFFORTS = ("", "low", "medium", "high")
 
 #: Smallest interval each tier may be set to. Below these the budget stops meaning anything.
 _CADENCE_FLOORS = {"fast": 10, "medium": 60, "slow": 600, "daily": 3600, "collate": 60}
 
 
-def _analyst(analyst: Analyst) -> None:
-    if analyst.provider not in _PROVIDERS:
-        raise ConfigError(f"analyst.provider must be one of {list(_PROVIDERS[1:])} or empty")
+def check_judge(judge: JudgeServer) -> None:
+    """Raise ConfigError unless the judge's name and URL are usable (the name is what every
+    badge and attestation shows; the URL is loopback, see `judge_url_problem`)."""
+    if not _JUDGE_NAME.fullmatch(judge.name):
+        raise ConfigError("judge.name must be 1-40 characters: letters, digits, spaces and . _ - "
+                          "+ / ( ), starting with a letter or digit")
+    if problem := judge_url_problem(judge.url):
+        raise ConfigError(problem)
+
+
+def check_analyst(analyst: Analyst, *, keyed: bool) -> None:
+    """Raise ConfigError unless `analyst` is usable as written. `keyed`: whether a key will be
+    sent (named in `api_key_env`, or set from the dashboard), which forbids plain http beyond
+    loopback."""
+    if analyst.provider not in PROVIDERS:
+        raise ConfigError(f"analyst.provider must be one of {list(PROVIDERS[1:])} or empty")
     if not analyst.provider:
         return
     if not analyst.model.strip():
@@ -395,17 +406,36 @@ def _analyst(analyst: Analyst) -> None:
         raise ConfigError("analyst.api_key_env names an environment variable; it looks like a key")
     if analyst.reach not in REACHES:
         raise ConfigError(f"analyst.reach must be one of {list(REACHES)}")
-    if analyst.reasoning_effort not in _EFFORTS:
-        raise ConfigError(f"analyst.reasoning_effort must be one of {list(_EFFORTS[1:])} or empty")
+    if analyst.reasoning_effort not in EFFORTS:
+        raise ConfigError(f"analyst.reasoning_effort must be one of {list(EFFORTS[1:])} or empty")
     if analyst.reasoning_effort and analyst.provider != "openai-compatible":
         raise ConfigError("analyst.reasoning_effort applies to an openai-compatible provider only")
     url = urlsplit(analyst.base_url or "https://api.anthropic.com")
     host = url.hostname or ""
     if url.scheme not in ("http", "https") or not host:
         raise ConfigError("analyst.base_url must be an http(s) URL with a host")
-    if problem := endpoint_problem(analyst.reach, host, url.scheme,
-                                   keyed=bool(analyst.api_key_env)):
+    if problem := endpoint_problem(analyst.reach, host, url.scheme, keyed=keyed):
         raise ConfigError(problem)
+
+
+def judge_url_problem(url: str) -> str:
+    """Why the judge cannot be at `url`, or "". The judge is sent redacted machine state on every
+    collation, so it is plain http to a loopback host, with no credentials in the URL."""
+    parts = urlsplit(url)
+    try:
+        parts.port  # noqa: B018 - reading it is the check: it raises on a bad port
+    except ValueError:
+        return f"judge.url {url!r} has an invalid port"
+    if parts.scheme != "http" or not parts.hostname or parts.username or parts.password:
+        return f"judge.url must be plain http:// to a host, got {url!r}"
+    host = parts.hostname
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host == "localhost"
+    if not loopback:
+        return f"judge.url must be loopback: the judge sees the host's state, got {host!r}"
+    return ""
 
 
 def endpoint_problem(reach: str, host: str, scheme: str, *, keyed: bool) -> str:

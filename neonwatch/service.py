@@ -66,7 +66,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, TextIO
 
-from neonwatch import agent_token, broker, bus, jobs, logs, rules, web
+from neonwatch import agent_token, broker, bus, jobs, logs, models, rules, web
 from neonwatch.analyst import Analyst
 from neonwatch.analyst import urllib_transport as analyst_transport
 from neonwatch.bus import Bus, BusError
@@ -75,6 +75,7 @@ from neonwatch.correlator import Correlator
 from neonwatch.evaluator import Evaluator, EvaluatorError
 from neonwatch.judge import Judge
 from neonwatch.judge import urllib_transport as judge_transport
+from neonwatch.models import write_private
 from neonwatch.notifier import Notification, Notifier, Send, gdbus_send
 from neonwatch.schema import Event, Issue, Kind, SchemaError, from_body
 from neonwatch.store import Store, StoreError
@@ -232,8 +233,13 @@ class Service:
                  notifier: Notifier, analyst: Analyst | None, token: str,
                  clock: Callable[[], float], out: TextIO,
                  ssl_context: ssl.SSLContext | None = None,
-                 agent_token: Callable[[], str] | None = None) -> None:
+                 agent_token: Callable[[], str] | None = None,
+                 models: models.Models | None = None,
+                 environ: Mapping[str, str] | None = None) -> None:
         self._config = config
+        #: The models the dashboard may change (None: the Models view is off), and the
+        #: environment the analyst's api_key_env is read from.
+        self.models, self._environ = models, environ or {}
         self._evaluator_bus, self._viewer_bus = evaluator_bus, viewer_bus
         self._notifier_bus = notifier_bus
         self.store, self.judge, self.analyst = store, judge, analyst
@@ -404,7 +410,7 @@ class Service:
         try:
             app = web.make_app(self.store, self.live, self.token, self._config, self.analyst,
                                judge_health=self._judge_health, read_logs=logs.read_journal,
-                               agent_token=self.agent_token)
+                               agent_token=self.agent_token, models=self.models)
             stop_web = await web.start(app, self._config.web.host, self._config.web.port,
                                        ssl_context=self.ssl_context)
             print(self.url(), file=self._out, flush=True)
@@ -464,6 +470,19 @@ class Service:
         except OSError as bad:
             log.warning("could not remove %s: %s", where, bad)
 
+    def models_changed(self, config: Config, keys: models.Keys) -> Analyst | None:
+        """Apply a change made from the dashboard, without a restart: the judge is retargeted for
+        the next collation, and the new analyst is returned for the dashboard's next job (a
+        running one keeps its own)."""
+        self._config = config
+        self.judge.retarget(judge_transport(config.judge.url, config.judge.timeout_s,
+                                            keys.judge), config.judge)
+        self.analyst = _analyst(config, keys, self._environ)
+        log.info("models changed from the dashboard: judge %s at %s (%s); analyst %s",
+                 config.judge.name, config.judge.url, config.judge.model,
+                 f"{config.analyst.provider} {config.analyst.model}" if self.analyst else "off")
+        return self.analyst
+
     async def close(self) -> None:
         """Close the bus connections and the store. Safe to call again."""
         if self._closed:
@@ -482,24 +501,6 @@ class Service:
 
 #: The dashboard URL for the desktop app, beside the store.
 URL_FILE = "dashboard.url"
-_STAGE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
-
-
-def write_private(where: Path, text: str) -> None:
-    """Write `text` to `where` as a 0600 file, atomically: a private staged file renamed over the
-    old one, which replaces a symlink rather than writing through it."""
-    staged = where.with_name(f".{where.name}.{secrets.token_hex(8)}")
-    fd = os.open(staged, _STAGE, 0o600)
-    try:
-        try:
-            os.fchmod(fd, 0o600)   # whatever the umask
-            os.write(fd, text.encode())
-        finally:
-            os.close(fd)
-        os.replace(staged, where)
-    except BaseException:
-        staged.unlink(missing_ok=True)
-        raise
 
 
 def tls_context(settings: Web) -> ssl.SSLContext | None:
@@ -528,28 +529,32 @@ def tls_context(settings: Web) -> ssl.SSLContext | None:
     return context
 
 
-def _analyst(config: Config, environ: Mapping[str, str]) -> Analyst | None:
+def _analyst(config: Config, keys: models.Keys, environ: Mapping[str, str]) -> Analyst | None:
+    """The analyst `config` asks for, with the dashboard's key or else the one `api_key_env`
+    names; None when there is none, or when a named key is set nowhere."""
     settings = config.analyst
     if not settings.provider:
         return None
-    key = ""
-    if settings.api_key_env:
-        if settings.api_key_env not in environ:
-            log.warning("analyst disabled: analyst.api_key_env names %s, which is not set in "
-                        "the service's environment", settings.api_key_env)
-            return None
-        key = environ[settings.api_key_env]
+    key = models.analyst_key(config, keys, environ)
+    if settings.api_key_env and not key:
+        log.warning("analyst disabled: analyst.api_key_env names %s, which is not set in "
+                    "the service's environment, and no key is set from the dashboard",
+                    settings.api_key_env)
+        return None
     log.info("analyst: %s model %s", settings.provider, settings.model)
     return Analyst(analyst_transport(settings.timeout_s), config, key)
 
 
 async def open_service(config: Config, *, environ: Mapping[str, str], judge: Any = None,
                        send: Send = gdbus_send, clock: Callable[[], float] = time.time,
-                       out: TextIO | None = None, owner: int | None = None) -> Service:
+                       out: TextIO | None = None, owner: int | None = None,
+                       models_dir: Path | None = None) -> Service:
     """Connect each role, create the stream, open the store and build every component.
 
     `judge` defaults to the real judge client. `owner` is the uid each credentials file must
-    belong to (the bus also accepts root). On any failure, what was opened is closed.
+    belong to (the bus also accepts root). `models_dir` is where the dashboard's models and keys
+    live (`models.directory`); without it the Models view is off and `config` alone applies.
+    On any failure, what was opened is closed.
     """
     creds = broker.paths(config).creds
     ssl_context = tls_context(config.web)   # before anything is connected
@@ -562,8 +567,17 @@ async def open_service(config: Config, *, environ: Mapping[str, str], judge: Any
         await connections[0].ensure_streams(config)
         store = Store(Path(config.store.path).expanduser(), config)
         opened.callback(store.close)
+        chosen, keys, built = None, models.Keys(), []
+        if models_dir is not None:
+            chosen = models.Models(config, models_dir, os.getuid() if owner is None else owner,
+                                   environ, lambda c, k: built[0].models_changed(c, k))
+            config, problems = chosen.load()
+            for problem in problems:
+                log.warning("models: %s; config.toml applies instead", problem)
+            keys = chosen.keys
         if judge is None:
-            judge = Judge(judge_transport(config.judge.url, config.judge.timeout_s), config)
+            judge = Judge(judge_transport(config.judge.url, config.judge.timeout_s, keys.judge),
+                          config)
         evaluator = Evaluator(rules.evaluate, judge, Correlator(judge, config), config, clock)
         evaluator.adopt(store.issues())   # or an issue that went away meanwhile never resolves
         service = Service(config, evaluator_bus=connections[0], viewer_bus=connections[1],
@@ -571,9 +585,11 @@ async def open_service(config: Config, *, environ: Mapping[str, str], judge: Any
                           evaluator=evaluator,
                           notifier=Notifier(logging_send(send), config, clock,
                                             sent=store.notified(), record=store.note_notified),
-                          analyst=_analyst(config, environ), token=secrets.token_urlsafe(32),
-                          clock=clock, out=out or sys.stdout, ssl_context=ssl_context,
-                          agent_token=_agent_token(config))
+                          analyst=_analyst(config, keys, environ),
+                          token=secrets.token_urlsafe(32), clock=clock, out=out or sys.stdout,
+                          ssl_context=ssl_context, agent_token=_agent_token(config),
+                          models=chosen, environ=environ)
+        built.append(service)
         opened.pop_all()
     return service
 
@@ -640,17 +656,19 @@ def main(argv: list[str], *, uid: int | None = None,
         print(f"neonwatch service: {bad}", file=sys.stderr)
         return 2
     configure_logging()
-    return asyncio.run(_serve(config, os.environ if environ is None else environ, uid))
+    return asyncio.run(_serve(config, os.environ if environ is None else environ, uid,
+                              models.directory(args.config, Path.home())))
 
 
-async def _serve(config: Config, environ: Mapping[str, str], uid: int) -> int:
+async def _serve(config: Config, environ: Mapping[str, str], uid: int,
+                 models_dir: Path | None = None) -> int:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
     try:
         try:
-            service = await open_service(config, environ=environ, owner=uid)
+            service = await open_service(config, environ=environ, owner=uid, models_dir=models_dir)
         except (BusError, StoreError, OSError, ValueError) as bad:
             print(f"neonwatch service: cannot start: {bad}", file=sys.stderr)
             return 1
