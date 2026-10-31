@@ -277,6 +277,37 @@ def test_the_judges_name_is_checked_by_the_configs_rule(tmp_path):
     assert config.judge.name == "Qwen 7B judge" and len(applied.calls) == 1
 
 
+def test_a_key_does_not_follow_its_endpoint_to_a_new_one(tmp_path):
+    """Whoever holds a dashboard session must not be able to point the analyst or the judge at a
+    server of theirs and receive the key the operator saved for another."""
+    m, applied = make(tmp_path)
+    m.save({"analyst": LOCAL_LLM, "judge": {"model": "j2"},
+            "keys": {"analyst": "sk-saved", "judge": "jk-saved"}})
+    elsewhere = dict(LOCAL_LLM, base_url="http://127.0.0.1:9999/v1")
+    for change in ({"analyst": elsewhere}, {"analyst": dict(LOCAL_LLM, provider="anthropic")},
+                   {"analyst": None}, {"judge": {"url": "http://127.0.0.1:9999/v1/systemone"}}):
+        with pytest.raises(ModelsError, match="key does not move with it"):
+            m.save(change)
+    assert len(applied.calls) == 1 and m.keys == Keys(analyst="sk-saved", judge="jk-saved")
+    m.save({"analyst": dict(LOCAL_LLM, model="other")})   # the same endpoint keeps its key
+    config, _ = m.save({"analyst": elsewhere, "keys": {"analyst": "sk-for-9999"}})
+    assert config.analyst.base_url.endswith(":9999/v1") and m.keys.analyst == "sk-for-9999"
+    m.save({"judge": {"url": "http://127.0.0.1:9999/v1/systemone"}, "keys": {"judge": ""}})
+    assert m.keys.judge == ""
+
+
+def test_the_environments_key_serves_only_the_configs_endpoint(tmp_path):
+    base = Config(analyst=Analyst(**{**LOCAL_LLM, "api_key_env": "MY_KEY"}))
+    m, _ = make(tmp_path, base, {"MY_KEY": "env-key"})
+    elsewhere = dict(LOCAL_LLM, base_url="http://127.0.0.1:9999/v1")
+    for keys in ({}, {"analyst": ""}):
+        with pytest.raises(ModelsError, match=r"\$MY_KEY is for config.toml's"):
+            m.save({"analyst": elsewhere, "keys": keys})
+    m.save({"analyst": elsewhere, "keys": {"analyst": "sk-here"}})
+    m.save({"analyst": None, "keys": {"analyst": ""}})   # back to config.toml's, and its key
+    assert m.overlay == {} and m.keys == Keys()
+
+
 def test_unchanged_files_are_not_rewritten(tmp_path):
     m, _ = make(tmp_path)
     m.save({"keys": {"analyst": "k1"}})

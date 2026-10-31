@@ -1008,6 +1008,16 @@ def test_stray_double_quotes_inside_strings_are_mended(raw, parsed):
     assert reply_object(raw) == parsed
 
 
+def test_mending_quotes_is_linear_in_a_reply_the_backend_controls():
+    """The mend copied the rest of the reply at every quote: 240 KB of quotes took 0.4 s on the
+    service loop, and a reply may be 4 MiB."""
+    import time
+    raw = '{"a": "' + 'x" ' * 80_000 + '"}'
+    start = time.perf_counter()
+    reply_object(raw)
+    assert time.perf_counter() - start < 0.2
+
+
 def test_valid_json_is_never_rewritten_and_hopeless_text_stays_unparsed():
     assert reply_object('{"a": "she said \\"hi\\"", "b": [1, true, null]}') == {
         "a": 'she said "hi"', "b": [1, True, None]}

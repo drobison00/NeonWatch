@@ -15,14 +15,17 @@ opened is resolved when its condition has gone, rather than left open forever.
 
 It also prunes the store every `PRUNE_EVERY_S`, and serves the dashboard. On loopback without a
 password, that is with a per-launch token: the dashboard URL, token included, is printed to stdout
-once, the operator's way in. It is never logged, and aiohttp's access log (which would record the
-`?token=` of the first visit) is silenced. With `web.password_hash` set there is no token: the URL
-printed is `https://<first allowed host>/`, and the browser logs in there. With `web.tls_cert`
-and `web.tls_key` set the dashboard is served over TLS 1.2 or later only, and the service will not
-start if either file is missing or unreadable, or if the key is reachable by group or other.
+once when stdout is a terminal, the operator's way in. It is never logged, and aiohttp's access
+log (which would record the `?token=` of the first visit) is silenced. When stdout is not a
+terminal (a systemd unit's goes to the journal, which members of adm read), it gets the URL
+without the token and where `dashboard.url` is. With `web.password_hash` set there is no token:
+the URL printed is `https://<first allowed host>/`, and the browser logs in there. With
+`web.tls_cert` and `web.tls_key` set the dashboard is served over TLS 1.2 or later only, and the
+service will not start if either file is missing or unreadable, or if the key is reachable by
+group or other.
 The same URL is written to `dashboard.url` beside the store (mode 0600, replaced atomically, and
 removed when the service stops) for the desktop app, so it can sign in without the operator
-copying it; only the operator's account can read it, as it can already read stdout.
+copying it; only the operator's account can read it.
 
 `hash_password_command` is `neonwatch hash-password`: it lives here, not in the launcher, because
 the launcher is privileged code with a closed import list (no `getpass`, no web).
@@ -413,12 +416,12 @@ class Service:
                                agent_token=self.agent_token, models=self.models)
             stop_web = await web.start(app, self._config.web.host, self._config.web.port,
                                        ssl_context=self.ssl_context)
-            print(self.url(), file=self._out, flush=True)
             url_file = self._publish_url()
+            print(self._shown_url(url_file), file=self._out, flush=True)
             log.info("dashboard listening on %s:%d%s (%s)", self._config.web.host,
                      self._config.web.port, " over TLS" if self.ssl_context else "",
                      "log in at the URL on stdout" if self._config.web.password_hash
-                     else "the URL with its token is on stdout")
+                     else f"the URL with its token is in {url_file}")
             jobs = {
                 "evaluator": self.consume(self._evaluator_bus, "obs.>", "evaluator",
                                           self.handle_observation),
@@ -450,6 +453,17 @@ class Service:
                 await stop_web()
             await self.close()
             log.info("service stopped: %s", self.counts)
+
+    def _shown_url(self, url_file: Path | None) -> str:
+        """What stdout gets: the URL with its token only on a terminal. Anywhere else stdout may
+        be kept where others read it (a systemd unit's goes to the journal, which the adm group
+        reads), so the token stays in `URL_FILE` and the line says where."""
+        url = self.url()
+        isatty = getattr(self._out, "isatty", None)
+        if "?token=" not in url or (isatty is not None and isatty()):
+            return url
+        where = url_file if url_file is not None else "not written; see the log"
+        return f"{url.split('?', 1)[0]} (the sign-in URL, with its token: {where})"
 
     def _publish_url(self) -> Path | None:
         """Write the dashboard URL to `URL_FILE` beside the store, for the desktop app. A failure

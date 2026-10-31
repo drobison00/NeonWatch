@@ -79,7 +79,7 @@ def ensure(where: Path, owner: int) -> tuple[str, bool]:
     except TokenError:
         if os.path.lexists(where):
             raise
-    where.parent.mkdir(parents=True, exist_ok=True)
+    where.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     token = _new()
     try:
         _write(where, token)
@@ -100,7 +100,7 @@ def rotate(where: Path, owner: int) -> str:
     if info is not None and (not stat.S_ISREG(info.st_mode) or info.st_uid != owner):
         raise TokenError(f"{where}: not a regular file owned by uid {owner}; refusing to "
                          f"replace it")
-    where.parent.mkdir(parents=True, exist_ok=True)
+    where.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     token = _new()
     staged = where.with_name(f".{FILE}.{secrets.token_hex(8)}")
     _write(staged, token)

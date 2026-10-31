@@ -518,12 +518,14 @@ async def test_run_serves_prints_the_url_once_and_closes_everything_on_stop(tmp_
                   out=out)
     stop = asyncio.Event()
     running = asyncio.create_task(svc.run(stop))
-    url = f"http://127.0.0.1:{config.web.port}/?token={'k' * 43}"
+    url = f"http://127.0.0.1:{config.web.port}/"
     for _ in range(200):
         if out.getvalue():
             break
         await asyncio.sleep(0.01)
-    assert out.getvalue() == url + "\n"
+    # Not a terminal, so not the token: a unit's stdout goes to the journal, which adm reads.
+    assert out.getvalue() == (f"{url} (the sign-in URL, with its token: "
+                              f"{tmp_path / service.URL_FILE})\n")
     health = await asyncio.to_thread(get, config.web.port, "/api/health", "k" * 43)
     assert health[0] == 200 and b"judge" in health[1]
     stop.set()
@@ -535,6 +537,26 @@ async def test_run_serves_prints_the_url_once_and_closes_everything_on_stop(tmp_
     with pytest.raises(Exception):  # noqa: B017 - the store's connection is closed
         store.issues()
     await svc.close()   # idempotent
+
+
+class Terminal(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+async def test_the_token_is_printed_only_to_a_terminal(tmp_path):
+    for out, token_shown in ((Terminal(), True), (io.StringIO(), False)):
+        config = web_config(tmp_path)
+        svc = Service(config, evaluator_bus=FakeBus(), viewer_bus=FakeBus(),
+                      notifier_bus=FakeBus(), store=SqliteStore(tmp_path / "s.sqlite3", config),
+                      judge=FakeJudge(), evaluator=FakeEvaluator(), notifier=FakeNotifier(),
+                      analyst=None, token="k" * 43, clock=time.time, out=out)
+        stop = asyncio.Event()
+        running = asyncio.create_task(svc.run(stop))
+        await started(out)
+        assert ("k" * 43 in out.getvalue()) is token_shown
+        stop.set()
+        assert await running == 0
 
 
 def quiet_service(tmp_path: Path, config: Config) -> tuple[Service, io.StringIO]:
@@ -560,7 +582,7 @@ async def test_run_writes_the_url_for_the_desktop_app_privately_and_removes_it_o
     running = asyncio.create_task(svc.run(stop))
     await started(out)
     written = tmp_path / service.URL_FILE
-    assert written.read_text() == out.getvalue()
+    assert written.read_text() == f"http://127.0.0.1:{config.web.port}/?token={'k' * 43}\n"
     assert stat.S_IMODE(written.stat().st_mode) == 0o600
     assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".")] == []   # no staging
     stop.set()
@@ -1340,9 +1362,10 @@ async def test_an_agent_observation_becomes_a_stored_live_notified_critical_issu
     assert any(n.issue_id == critical.id and n.urgency == 2 for n in sent)
     assert judge.asked >= 1   # the fake judge was asked; no judge was
     assert svc.counts.dropped == 0 and svc.counts.refused == 0
-    # The URL is printed once to stdout, and the token appears in no log line.
-    assert out.getvalue().count(svc.token) == 1
-    assert out.getvalue() == f"http://127.0.0.1:{config.web.port}/?token={svc.token}\n"
+    # stdout is not a terminal here, so it has the URL without the token (a unit's stdout goes
+    # to the journal), and no log line has the token either.
+    assert out.getvalue().count(svc.token) == 0
+    assert out.getvalue().startswith(f"http://127.0.0.1:{config.web.port}/ (the sign-in URL")
     assert svc.token not in caplog.text
 
 

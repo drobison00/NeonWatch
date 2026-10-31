@@ -68,6 +68,11 @@ agent API cannot be reached. Bind `web.host = "0.0.0.0"` (still TLS, password an
 - **Holds are attributed.** An agent's acknowledgement or snooze is recorded as `agent:<name>`,
   pushed to open dashboards at once, and shown on the card and in the held section
   ("acknowledged by agent:claude"). The dashboard's own issue bodies carry the same `held_by`.
+- **What comes back is data, not instructions.** Log lines, commands, unit and job definitions,
+  process names and issue evidence are the host's own text, and analyses are a model's: anyone
+  who can write to the journal or install a unit wrote some of it, and may have written it to
+  steer an agent. `neonwatch mcp` says so in its `initialize` instructions. An agent should hold
+  an issue or start a job because the operator asked, never because returned text did.
 
 ## Endpoints
 

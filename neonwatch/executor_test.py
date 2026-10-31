@@ -648,6 +648,28 @@ def test_a_glob_frames_every_match(tmp_path):
         f'{{"{tmp_path}/k1":"one","{tmp_path}/k2":"two"}}')
 
 
+def test_a_glob_reads_a_bounded_number_of_matches_and_says_so(tmp_path):
+    """A user can make any number of files where a glob looks; each is an open as root and a
+    record, and 20000 empty ones made an event over five times the publish limit."""
+    for i in range(executor.MAX_MATCHES + 40):
+        (tmp_path / f"k{i:04d}").touch()
+    result = run_one(read("g", Kind.GLOB, tmp_path / "k*"))
+    assert len(parse_frame(result.stdout)) == executor.MAX_MATCHES
+    assert result.truncated and result.exit_code == 0
+    assert result.warnings == (f"more than {executor.MAX_MATCHES} matches: the rest were not "
+                               "read",)
+    exactly = tmp_path / "exactly"
+    exactly.mkdir()
+    for i in range(executor.MAX_MATCHES):
+        (exactly / f"k{i:04d}").touch()
+    result = run_one(read("g", Kind.GLOB, exactly / "k*"))
+    assert len(parse_frame(result.stdout)) == executor.MAX_MATCHES and not result.truncated
+
+
+def parse_frame(raw: bytes) -> dict:
+    return json.loads(raw)
+
+
 def test_a_glob_that_matches_nothing_is_an_empty_result(tmp_path):
     result = run_one(read("g", Kind.GLOB, tmp_path / "nothing*"))
     assert result == RawResult(b"{}", 0, result.cpu_ms, False)
@@ -735,8 +757,8 @@ def test_a_glob_without_a_wildcard_reads_its_one_file(tmp_path):
 
 def test_a_glob_match_that_vanishes_before_it_is_read_is_not_an_error(tmp_path, monkeypatch):
     (tmp_path / "k1").write_text("one")
-    monkeypatch.setattr(executor.glob, "glob",
-                        lambda pattern: [str(tmp_path / "k1"), str(tmp_path / "k-gone")])
+    monkeypatch.setattr(executor.glob, "iglob",
+                        lambda pattern: iter([str(tmp_path / "k1"), str(tmp_path / "k-gone")]))
     result = run_one(read("g", Kind.GLOB, tmp_path / "k*"))
     assert result.exit_code == 0
     assert result.stdout.decode() == f'{{"{tmp_path}/k1":"one"}}'
