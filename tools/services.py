@@ -19,7 +19,9 @@ writes the unit.
 
 What this does not close: the bundle is built by your account, so installing trusts your account
 at that moment, and so does running this file under sudo. What it closes is the standing
-exposure: from then on the unit runs nothing your account can modify.
+exposure: from then on the unit runs nothing your account can modify. The build itself runs only
+pinned code: nats-py comes from uv.lock by hash, and the build backend that writes our wheel from
+build-constraints.txt by hash, so a new release of either cannot reach /opt unannounced.
 
 `--root DIR` installs under DIR as a staging prefix (the unit still names /opt/neonwatch) and
 expects files owned by whoever runs it; with `--no-systemctl` that is how the tests run it.
@@ -53,6 +55,8 @@ USER_UNITS = ("neonwatch-broker.service", "neonwatch-service.service")
 PYTHON = "/usr/bin/python3"
 NATS = "nats-py"
 MANIFEST = "manifest.json"
+#: The build backend and its imports, pinned by hash: what writes the wheel root installs.
+BUILD_CONSTRAINTS = "build-constraints.txt"
 #: What `neonwatch.launch agent` imports once it runs; importing them proves the bundle is whole.
 AGENT_MODULES = ("neonwatch.launch", "neonwatch.bus", "neonwatch.collector", "neonwatch.executor",
                  "neonwatch.probes")
@@ -205,7 +209,8 @@ def bundle(out: Path = BUNDLE, *, repo: Path = REPO, run: Run = subprocess.run,
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    run(["uv", "build", "--wheel", "--out-dir", str(out), str(repo)], check=True)
+    run(["uv", "build", "--wheel", "--require-hashes", "--build-constraints",
+         str(repo / BUILD_CONSTRAINTS), "--out-dir", str(out), str(repo)], check=True)
     built = sorted(out.glob("*.whl"))
     if len(built) != 1:
         raise Refused(f"uv build left {len(built)} wheels in {out}, not one")

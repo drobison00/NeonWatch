@@ -232,7 +232,8 @@ processes, so stop them first: Ctrl-C in each terminal, the agent first.
 scripts/install-agent
 ```
 
-It builds NeonWatch's wheel and downloads the nats-py wheel `uv.lock` pins (checked against its
+It builds NeonWatch's wheel, with a build backend pinned by hash in `build-constraints.txt` (its
+header says how to move it), and downloads the nats-py wheel `uv.lock` pins (checked against its
 hash) into `dist/agent` as you, then asks sudo to run
 `tools/services.py install-agent --operator <you>` on the system Python, isolated. That copies
 the bundle somewhere only root can write and checks every hash. It builds `/opt/neonwatch.new`,
