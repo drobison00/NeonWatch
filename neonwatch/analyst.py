@@ -754,9 +754,13 @@ def _unstray(text: str) -> str:
             if not inside:
                 inside = True
             else:
-                rest = text[i + 1:].lstrip()
-                if (not rest or rest[0] in ":}]"
-                        or (rest[0] == "," and _AFTER_COMMA.match(rest, 1))):
+                # Looked at in place: copying the rest of the reply at every quote was quadratic
+                # in a reply the backend controls (240 KB of quotes took 0.4 s, 4 MiB minutes).
+                j = i + 1
+                while j < n and text[j].isspace():
+                    j += 1
+                if (j == n or text[j] in ":}]"
+                        or (text[j] == "," and _AFTER_COMMA.match(text, j + 1))):
                     inside = False
                 else:
                     out.append('\\"')
