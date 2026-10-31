@@ -75,6 +75,10 @@ _BIN_DIRS = frozenset({"/usr/bin", "/usr/sbin", "/bin", "/sbin"})
 _ADMITTED: frozenset[ProbeSpec] = frozenset(CATALOG)
 
 _CHUNK = 65536
+#: Matches one GLOB reads at most. A user can create any number of files where a glob looks
+#: (`/home/*/.ssh/authorized_keys*`), each an open as root and a record in the observation:
+#: 20000 empty files took 3 s and made an event over five times the publish limit.
+MAX_MATCHES = 256
 #: What makes a path component a glob wildcard (the catalog's own definition).
 _WILDCARD = re.compile(r"[*?\[]")
 #: Exit codes: a failed read; a command refused before exec; one that could not be exec'd.
@@ -457,18 +461,27 @@ def _matches(path: str, pattern: str) -> bool:
 
 
 def _glob(spec: ProbeSpec, _timeout_s: float, max_bytes: int) -> RawResult:
-    """Every match, each capped at `max_bytes // 4`, all together at `max_bytes`.
+    """Up to `MAX_MATCHES` matches, each capped at `max_bytes // 4`, all together at `max_bytes`.
 
     Matches are keyed under the resolved prefix, and each must open a file inside it. A match
     that is refused, cut at either cap, or left unread once the total is spent is named in
-    `warnings`; the rest are still returned, exit 0. A vanished match is no match.
+    `warnings`; the rest are still returned, exit 0. A vanished match is no match. Past
+    `MAX_MATCHES` the glob is not walked further (which matches are kept is then the
+    directory's order), and one warning says so.
     """
     pattern = _resolved(spec.path)
     per_file = max_bytes // 4
     files: dict[str, bytes] = {}
     warnings: list[str] = []
     truncated = False
-    for path in sorted(glob.glob(pattern)):
+    matches: list[str] = []
+    for path in glob.iglob(pattern):
+        if len(matches) == MAX_MATCHES:
+            warnings.append(f"more than {MAX_MATCHES} matches: the rest were not read")
+            truncated = True
+            break
+        matches.append(path)
+    for path in sorted(matches):
         remaining = max_bytes - sum(map(len, files.values()))
         if remaining == 0:
             warnings.append(f"not read {path}: the total of {max_bytes} bytes is spent")
