@@ -18,8 +18,10 @@ count travels with the observation so a reader can see that something was cut.
 
 Every pattern starts at a fixed anchor (a lookbehind, a literal, or a bounded gap), so no
 pattern retries from every character of a long word, and where an anchor can recur within one
-word (`-u` after any non-word character) the run that follows it is bounded, so each start scans
-a bounded distance: linear in what a local user controls.
+word (`-u` after any non-word character) the run that follows it is bounded, or a search that
+fails is not repeated from the next start (a private key block with no END takes the rest of the
+text), so each start scans a bounded distance: linear in what a local user controls. That is a
+claim about every shape, so `redact_test` times a hostile repetition of every shape by name.
 """
 
 from __future__ import annotations
@@ -35,16 +37,24 @@ SECRET_KEY = re.compile(
     r"(?i)^.*(pass(word|wd|phrase)?|_pwd|secret|token|api[_-]?key|private[_-]?key|credential|"
     r"auth(orization)?|cookie|session[_-]?id|access[_-]?key)s?$")
 
-TOKENS = re.compile("|".join([
-    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
-    r"(?i:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}",
-    r"\bfga?_[A-Za-z0-9]{16,}",
-    r"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}",
-    r"\bgh[pousr]_[A-Za-z0-9]{20,}",
-    r"\bgithub_pat_[A-Za-z0-9_]{20,}",
-    r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
-    r"\bAKIA[0-9A-Z]{16}\b",
-    r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",  # a JWT
+#: Each token shape by name. `redact_test` holds a hostile repetition for every name, so a shape
+#: added without one fails there rather than shipping unmeasured.
+SHAPES = {
+    # A block with no END is cut to the end of the text. Searching on for an END that is not
+    # there, from every BEGIN, is quadratic in a journal message or a model's answer; and a
+    # key cut short (a field capped mid-block) is still key material.
+    "private_key": r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
+                   r"(?:[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----|[\s\S]*)",
+    "bearer": r"(?i:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}",
+    "forge_gate": r"\bfga?_[A-Za-z0-9]{16,}",
+    "api_key": r"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}",
+    "github": r"\bgh[pousr]_[A-Za-z0-9]{20,}",
+    "github_pat": r"\bgithub_pat_[A-Za-z0-9_]{20,}",
+    "slack": r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
+    "aws": r"\bAKIA[0-9A-Z]{16}\b",
+    # A JWT. Anchored at the start of a run rather than at `\b`, which allows a fresh start
+    # after every `-` in one long run (`eyJ-eyJ-...`), each scanning to the run's end: quadratic.
+    "jwt": r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{10,}",
     # Hyphens count as part of a key: `-dev-root-token-id=value` is a live command-line shape.
     # The lookbehind anchors the match to the START of a key: without it the engine retries
     # from every character of an unbroken word, which is quadratic in a length any local user
@@ -52,28 +62,32 @@ TOKENS = re.compile("|".join([
     # The key is then taken whole and never given back (`++`), with a lookahead for the secret
     # word: `[A-Z0-9_-]*word[A-Z0-9_-]*` backtracks over every occurrence of the word in one long
     # key, quadratic again (`atokenatoken...`, 1.3 s for 24 KB before this).
-    r"(?<![A-Za-z0-9_-])(?i:(?=[A-Z0-9_-]*?(?:pass(?:word|wd)?|_pwd|secret|token|api[_-]?key|"
-    r"credential))[A-Z0-9_-]++)"
-    r"\s*[=:]\s*[\"']?[^\s\"',;]{4,}",
-    r"(?i:--(?:password|passwd|token|secret|api-key))[= ]\S+",
-    r"://[^/\s:@]*:[^/\s@]+@",  # credentials in a URL, the user possibly empty
+    "assignment": r"(?<![A-Za-z0-9_-])(?i:(?=[A-Z0-9_-]*?(?:pass(?:word|wd)?|_pwd|secret|token|"
+                  r"api[_-]?key|credential))[A-Z0-9_-]++)"
+                  r"\s*[=:]\s*[\"']?[^\s\"',;]{4,}",
+    "flag": r"(?i:--(?:password|passwd|token|secret|api-key))[= ]\S+",
+    "url": r"://[^/\s:@]*:[^/\s@]+@",  # credentials in a URL, the user possibly empty
     # From here on, a pattern's one capturing group is the harmless lead kept before the mask.
     # curl -u/--user user:pass; a password that is all digits is a uid:gid (`docker -u 0:0`).
     # The user is bounded and never given back: every `-u` after a non-word character is a fresh
     # start, so an unbounded user made each one scan to the end of the word, quadratic in a word
     # of `(-u(-u...` (0.45 s for 24 KB; `(--user=` 1.2 s). A longer user is not taken for one.
-    r"(?<![\w-])(?:-u\s*+|--user[=\s]\s*+)[\"']?[^\s:\"']{1,256}+:(?!/)"
-    r"(?=[^\s\"']*[^\d\s\"'])[^\s\"']+",
+    "user": r"(?<![\w-])(?:-u\s*+|--user[=\s]\s*+)[\"']?[^\s:\"']{1,256}+:(?!/)"
+            r"(?=[^\s\"']*[^\d\s\"'])[^\s\"']+",
     # -pPASS (no space: `-p` alone prompts) within 256 characters of a mysql/mariadb word.
-    r"((?<![\w-])(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)(?![\w-])[^\n|;&]{0,256}?"
-    r"\s)-p[\"']?[^\s\"']+[\"']?",
-    r"((?<![\w-])sshpass\s+)-p\s*[\"']?[^\s\"']+",
+    "mysql": r"((?<![\w-])(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)(?![\w-])"
+             r"[^\n|;&]{0,256}?\s)-p[\"']?[^\s\"']+[\"']?",
+    "sshpass": r"((?<![\w-])sshpass\s+)-p\s*[\"']?[^\s\"']+",
     # smbclient -U user%pass; the user bounded for the same reason as `-u`'s.
-    r"(?<![\w-])-U\s*+[\"']?[^\s%\"']{1,256}+%[^\s\"']+",
-    r"((?<![\w-])(?i:proxy-)?(?i:authorization)\s*:\s*)[^\s\"']+(?:[ \t]+[^\s\"']+)?",
-    r"((?<![\w-])(?i:x-api-key|api-key|x-auth-token|token)\s*:\s*)[^\s\"']+",
-    r"([?&](?i:key|apikey|api_key|token|access_token|auth|sig|signature|password)=)[^&\s\"'#]+",
-]))
+    "smbclient": r"(?<![\w-])-U\s*+[\"']?[^\s%\"']{1,256}+%[^\s\"']+",
+    "authorization": r"((?<![\w-])(?i:proxy-)?(?i:authorization)\s*:\s*)"
+                     r"[^\s\"']+(?:[ \t]+[^\s\"']+)?",
+    "header": r"((?<![\w-])(?i:x-api-key|api-key|x-auth-token|token)\s*:\s*)[^\s\"']+",
+    "query": r"([?&](?i:key|apikey|api_key|token|access_token|auth|sig|signature|password)=)"
+             r"[^&\s\"'#]+",
+}
+
+TOKENS = re.compile("|".join(SHAPES.values()))
 
 
 def _mask(match: re.Match[str]) -> str:

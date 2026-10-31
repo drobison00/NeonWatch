@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from neonwatch.redact import MASK, redact, redact_mapping
+from neonwatch.redact import MASK, SHAPES, redact, redact_mapping
 
 
 @pytest.mark.parametrize("secret", [
@@ -116,20 +116,65 @@ def test_a_long_unbroken_word_is_linear_not_quadratic():
     assert time.perf_counter() - start < 0.5
 
 
-@pytest.mark.parametrize("text", [
-    "atoken" * 4000, "a_pwd" * 4000, "xsecret" * 3000, "mysql " * 4000 + "-p",
-    "mysql" + " a" * 10000, "-u " * 7000, "-ua" * 7000 + ":", "sshpass " * 3000, "-U a" * 5000,
-    "Authorization: " * 1500, "X-API-Key:" * 2000, "?key" * 5000, "://" + ":" * 20000,
-    "://" + "a:" * 10000, "basic " * 4000,
+#: A hostile repetition of every shape in `SHAPES`, by name: text a user can put in a journal
+#: message, a process argument or a model's answer, built to make that shape rescan. Each runs
+#: well under the bound when the shape is linear and far over it when it is not.
+HOSTILE = {
+    "private_key": ("-----BEGIN PRIVATE KEY----- " * 2000,
+                    "-----BEGIN RSA PRIVATE KEY-----\n" * 2000),
+    "bearer": ("basic " * 4000, "bearer\t" * 4000),
+    "forge_gate": ("fg_" * 8000, "fga_" * 6000),
+    "api_key": ("sk-" * 8000, "-sk-a" * 5000),
+    "github": ("ghp_" * 6000,),
+    "github_pat": ("github_pat_" * 2000, "github_pat-" * 2000),
+    "slack": ("xoxb-" * 5000, "xoxb" * 6000),
+    "aws": ("AKIA" * 6000, "AKIA-" * 5000),
+    "jwt": ("eyJ-" * 8000, "eyJaaaaaaaaaa." * 2000),
+    "assignment": ("atoken" * 4000, "a_pwd" * 4000, "xsecret" * 3000),
+    "flag": ("--password" * 3000, "--token" * 4000),
+    "url": ("://" + ":" * 20000, "://" + "a:" * 10000),
     # A fresh -u/-U start after every non-word character, no `:`/`%` to end the user.
-    "(-u" * 7000, "@-u" * 7000, "(--user=" * 3000, "(-U" * 7000, "(-u'" * 5000,
-], ids=lambda text: text[:8].replace(" ", "_"))
+    "user": ("-u " * 7000, "-ua" * 7000 + ":", "(-u" * 7000, "@-u" * 7000, "(--user=" * 3000,
+             "(-u'" * 5000),
+    "mysql": ("mysql " * 4000 + "-p", "mysql" + " a" * 10000),
+    "sshpass": ("sshpass " * 3000,),
+    "smbclient": ("-U a" * 5000, "(-U" * 7000),
+    "authorization": ("Authorization: " * 1500,),
+    "header": ("X-API-Key:" * 2000, "token :" * 3000),
+    "query": ("?key" * 5000,),
+}
+
+
+def test_every_shape_has_a_hostile_repetition():
+    """Linearity is claimed of every shape, so a shape is not added without its measurement."""
+    assert HOSTILE.keys() == SHAPES.keys()
+
+
+@pytest.mark.parametrize("text", [text for texts in HOSTILE.values() for text in texts],
+                         ids=lambda text: text[:8].replace(" ", "_"))
 def test_every_shape_is_linear_in_a_hostile_repetition(text):
     import time
     start = time.perf_counter()
     for _ in range(5):
         redact(text)
     assert time.perf_counter() - start < 0.5
+
+
+def test_a_private_key_block_with_no_end_is_cut_to_the_end_of_the_text():
+    """A field capped mid-block still holds key material, and searching for the missing END
+    from every BEGIN is what made the shape quadratic."""
+    cleaned, count = redact("key: -----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaA\nAAAA more")
+    assert (cleaned, count) == (f"key: {MASK}", 1)
+
+
+def test_a_jwt_is_cut_only_at_the_start_of_a_run():
+    """The anchor that keeps the shape linear: after `=`, a space or a quote it is a JWT; inside
+    a run of token characters (`-eyJ...`) it is part of that word."""
+    jwt = ("eyJhbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiIxMjM0NTY3ODkwIn0" + "." +
+           "dozjgNryP4J3jVmNHl0w5N")
+    for lead in ("id=", "x ", '"'):
+        assert redact(lead + jwt) == (lead + MASK, 1)
+    assert redact("x-" + jwt)[1] == 0
 
 
 def test_a_user_is_read_up_to_its_bound_and_no_further():
