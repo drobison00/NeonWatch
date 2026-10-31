@@ -745,7 +745,7 @@ def _modules(d: dict[str, Any], p: dict[str, Any] | None, dt: float | None) -> A
 
 def _keys(d: dict[str, Any], p: dict[str, Any] | None, dt: float | None) -> Any:
     keys = _rows(d, "keys")
-    return {"files": [{k: f.get(k) for k in ("path", "keys", "invalid_lines")}
+    return {"files": [{k: f.get(k) for k in ("path", "keys", "dropped", "invalid_lines")}
                       for f in _rows(d, "files")],
             "keys": [{k: key.get(k) for k in ("path", "type", "fingerprint", "comment",
                                               "options")} for key in keys][:30],

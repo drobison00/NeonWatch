@@ -9,6 +9,7 @@ are defined.
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
 
@@ -26,6 +27,7 @@ from neonwatch.probes.parsers import (
     MAX_ENTRIES_PER_FILE,
     MAX_ENTRIES_TOTAL,
     MAX_ENV_PER_FILE,
+    MAX_KEYS_PER_FILE,
     MESSAGE_CHARS,
     PARSERS,
     REDACT_CHARS,
@@ -1161,7 +1163,54 @@ def test_authorized_keys() -> None:
 
 
 def test_authorized_keys_absent() -> None:
-    assert p("ssh.keys.root", frame_files({})) == {"files": [], "keys": [], "count": 0}
+    assert p("ssh.keys.root", frame_files({})) == {"files": [], "keys": [], "count": 0,
+                                                   "dropped": 0}
+
+
+def ssh_keys(n: int, comment: bytes = b"x") -> bytes:
+    """`n` distinct, validly encoded ed25519-shaped keys."""
+    return b"".join(b"ssh-ed25519 " + base64.b64encode(i.to_bytes(4, "big") + bytes(28)) +
+                    b" " + comment + b"\n" for i in range(n))
+
+
+def test_authorized_keys_keep_a_bounded_number_and_count_the_rest() -> None:
+    """One home's file cannot crowd out another's: each keeps at most MAX_KEYS_PER_FILE."""
+    data = p("ssh.keys.home", frame_files({
+        "/home/aaa/.ssh/authorized_keys": ssh_keys(3000),
+        "/home/zoe/.ssh/authorized_keys": f"{ED25519}\n".encode()}))
+    files = {f["path"]: f for f in data["files"]}
+    assert files["/home/aaa/.ssh/authorized_keys"]["keys"] == 3000
+    assert files["/home/aaa/.ssh/authorized_keys"]["dropped"] == 3000 - MAX_KEYS_PER_FILE
+    assert files["/home/zoe/.ssh/authorized_keys"]["dropped"] == 0
+    assert data["keys"][-1]["fingerprint"] == ED25519_FP
+    assert (data["count"], data["dropped"]) == (MAX_KEYS_PER_FILE + 1, 3000 - MAX_KEYS_PER_FILE)
+
+
+def test_an_authorized_key_comment_is_redacted_and_cut() -> None:
+    """A comment is free text: a private key block pasted into one is cut, and a long one kept
+    to ARGS_CHARS, without reading past REDACT_CHARS (it reached redaction whole)."""
+    hostile = b"-----BEGIN PRIVATE KEY----- " * 8000
+    (key,) = p("ssh.keys.home", frame_files({"/home/a/.ssh/authorized_keys": ssh_keys(
+        1, b"me -----BEGIN OPENSSH PRIVATE KEY-----\x01b3Blbn")}))["keys"]
+    assert key["comment"] == f"me {MASK}"
+    (key,) = p("ssh.keys.home", frame_files({"/home/a/.ssh/authorized_keys": ssh_keys(
+        1, b"a" * (ARGS_CHARS + 50) + hostile)}))["keys"]
+    assert key["comment"] == "a" * ARGS_CHARS
+
+
+def test_the_worst_authorized_keys_the_caps_allow_still_publishes() -> None:
+    """Four files of 3000 keys fit the read caps and grew into an event over the
+    1 MiB limit, so the whole observation was dropped. Comments here are at their cap in the
+    characters JSON escapes longest, as in the crontab case above."""
+    worst = ("\U0001f600" * 2).encode() + b"\x01\xff"
+    for comment in (b"x", worst * (ARGS_CHARS // 2)):
+        parsed = parse("ssh.keys.home", frame_files({f"/home/u{i}/.ssh/authorized_keys":
+                                                     ssh_keys(3000, comment) for i in range(4)}))
+        assert parsed["dropped"] > 0
+        data, _ = redact_mapping(parsed)
+        event = schema.Event(schema.Kind.OBSERVATION, 1.0, "agent", "obs.ssh.keys.home",
+                             schema.to_body(schema.Observation("ssh.keys.home", data, 1000, True)))
+        assert len(schema.encode_event(event)) < schema.MAX_BYTES
 
 
 def test_scheduled_directory_names() -> None:
