@@ -138,7 +138,9 @@ SNOOZE_MAX_S = 7 * 86400
 COOKIE = "neonwatch_token"
 SESSION_COOKIE = "neonwatch_session"
 #: The session cookie's name under TLS: the prefix makes the browser keep it Secure, Path=/ and
-#: host-only, so it is not handed to other services on the same name.
+#: host-only (no Domain), so no other host name receives it. Cookies are not isolated by port
+#: (RFC 6265 8.5): another service on this host name, on any port, would be sent it, so the
+#: dashboard assumes no one else's service shares its host name (the single-user model).
 TLS_SESSION_COOKIE = "__Host-neonwatch_session"
 #: Static files served without a session in password mode: what the login page loads.
 LOGIN_ASSETS = frozenset({"login.html", "app.css"})
