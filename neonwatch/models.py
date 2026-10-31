@@ -297,7 +297,7 @@ class Models:
                 keys = dataclasses.replace(keys, **{name: _key(value, name, "the change")})
         config = effective(self.base, overlay)
         check(config, keys, self.environ)
-        self.where.mkdir(parents=True, exist_ok=True)
+        self.where.mkdir(parents=True, exist_ok=True, mode=0o700)
         if overlay != self.overlay:
             write_private(self.where / SETTINGS, json.dumps(overlay, indent=2) + "\n")
         if keys != self.keys:

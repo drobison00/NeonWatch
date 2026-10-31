@@ -334,7 +334,9 @@ class Store:
     def __init__(self, path: Path, config: Config) -> None:
         self._retention = config.retention
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        # Private, whatever the umask (Ubuntu's 002 made it group-writable): it holds the store,
+        # the agent token and the dashboard's sign-in URL.
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.close(os.open(path, os.O_RDWR | os.O_CREAT, 0o600))  # private before SQLite opens it
         self._db = sqlite3.connect(path, isolation_level=None)
         try:

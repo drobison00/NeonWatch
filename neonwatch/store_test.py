@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import sqlite3
 import stat
 from pathlib import Path
@@ -121,6 +122,15 @@ def test_new_database_is_private_to_its_owner(tmp_path: Path) -> None:
     path = tmp_path / "store.sqlite3"
     Store(path, config()).close()
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_a_new_state_directory_is_private_whatever_the_umask(tmp_path: Path) -> None:
+    old = os.umask(0o002)   # Ubuntu's
+    try:
+        Store(tmp_path / "state" / "store.sqlite3", config()).close()
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE((tmp_path / "state").stat().st_mode) == 0o700
 
 
 def test_reopening_keeps_what_was_written(tmp_path: Path) -> None:
