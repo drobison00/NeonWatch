@@ -171,6 +171,11 @@ keys, while it runs:
   differ from it are kept. **Revert to config.toml** removes that form's choices; keys are
   separate, with their own **Remove key**. The analyst's key is the dashboard's, else the one
   `api_key_env` names. The judge's key, for a local server that wants one, is sent as a bearer token.
+- **A key goes only where it was given for.** A save that changes where a form sends (the
+  judge's URL, or the analyst's provider or base URL), reverts included, must give that form's
+  key again or remove it: a saved key is never carried to a new endpoint, so whoever holds a
+  dashboard session cannot point the analyst at a server of theirs and receive it. The key
+  `api_key_env` names is `config.toml`'s, for `config.toml`'s endpoint alone.
 - **Checked whole, applied at once.** A change goes through the same rules as this file.
   The judge stays plain `http://` to loopback. The analyst keeps its `reach` rules, and a key forbids
   plain http beyond loopback. Anything refused changes nothing, and the dashboard shows why. An

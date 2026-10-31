@@ -10,7 +10,9 @@ replaced rather than written through:
   field that differs from `config.toml` is kept.
 - `secrets.json`: the keys, `{"judge": "...", "analyst": "..."}`. Never logged and never
   returned: the view says only whether a key is set and where it comes from. The analyst's key
-  falls back to the environment variable `api_key_env` names, as before.
+  falls back to the environment variable `api_key_env` names, as before. A key goes only to the
+  endpoint it was given for: a save that moves an endpoint gives its key again or removes it,
+  and the environment's key serves config.toml's endpoint alone.
 
 A change is checked whole by the config's own rules (`check_judge`, `check_analyst`)
 before anything is written, then applied live through the callback the service gives; nothing
@@ -174,6 +176,14 @@ def analyst_key(config: Config, keys: Keys, environ: Mapping[str, str]) -> str:
     return environ.get(name, "") if name else ""
 
 
+def endpoint(config: Config, name: str) -> tuple[str, ...]:
+    """Where a section's key is sent: the judge server's URL, or the analyst's provider and base
+    URL."""
+    if name == "judge":
+        return (config.judge.url.strip().rstrip("/"),)
+    return (config.analyst.provider, config.analyst.base_url.strip().rstrip("/"))
+
+
 def check(config: Config, keys: Keys, environ: Mapping[str, str]) -> None:
     """Raise ModelsError unless the models in `config` are usable with these keys."""
     try:
@@ -297,6 +307,7 @@ class Models:
                 keys = dataclasses.replace(keys, **{name: _key(value, name, "the change")})
         config = effective(self.base, overlay)
         check(config, keys, self.environ)
+        self._keys_stay(config, keys, asked_keys)
         self.where.mkdir(parents=True, exist_ok=True, mode=0o700)
         if overlay != self.overlay:
             write_private(self.where / SETTINGS, json.dumps(overlay, indent=2) + "\n")
@@ -305,3 +316,21 @@ class Models:
             write_private(self.where / SECRETS, json.dumps(kept_keys) + "\n")
         self.overlay, self.keys = overlay, keys
         return config, self._apply(config, keys)
+
+    def _keys_stay(self, config: Config, keys: Keys, asked: Mapping[str, Any]) -> None:
+        """A key is sent only where it was given for. A save that moves a section's endpoint
+        brings that section's key with it, or removes it: the dashboard's key is never carried
+        to a new endpoint, so whoever holds a dashboard session cannot point the analyst at a
+        server of theirs and receive the key. The environment's key is config.toml's, for
+        config.toml's endpoint alone."""
+        for name in FIELDS:
+            moved = endpoint(config, name) != endpoint(self.config, name)
+            if moved and getattr(keys, name) and not asked.get(name):
+                raise ModelsError(f"the {name} endpoint changes, and its key does not move with "
+                                  f"it: give the key for the new endpoint in the same save, or "
+                                  f"remove it")
+        env = config.analyst.api_key_env
+        if (not keys.analyst and endpoint(config, "analyst") != endpoint(self.base, "analyst")
+                and analyst_key(config, keys, self.environ)):
+            raise ModelsError(f"the key in ${env} is for config.toml's analyst endpoint, not this "
+                              f"one: set a key for it here")
