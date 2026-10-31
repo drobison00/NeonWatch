@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -176,8 +177,21 @@ def fake_repo(tmp_path: Path, nats: bytes) -> Path:
 
 
 def fake_uv(argv, *, check):
-    assert argv[:4] == ["uv", "build", "--wheel", "--out-dir"] and check
-    (Path(argv[4]) / "neonwatch-0.1.0-py3-none-any.whl").write_bytes(b"ours")
+    assert argv[:5] == ["uv", "build", "--wheel", "--require-hashes", "--build-constraints"]
+    assert Path(argv[5]).name == services.BUILD_CONSTRAINTS and argv[6] == "--out-dir" and check
+    (Path(argv[7]) / "neonwatch-0.1.0-py3-none-any.whl").write_bytes(b"ours")
+
+
+def test_the_build_backend_and_all_it_imports_are_pinned_by_hash():
+    """uv refuses an unpinned build requirement under --require-hashes; this says so before a
+    bundle is attempted, and that the backend pyproject names is among them."""
+    text = (REPO / services.BUILD_CONSTRAINTS).read_text()
+    pins = re.findall(r"^([a-z0-9][a-z0-9._-]*)==\S+((?:\s*\\\n\s+--hash=sha256:[0-9a-f]{64})+)",
+                      text, re.M)
+    names = [name for name, _ in pins]
+    requirements = [line for line in text.splitlines() if line and line[0].isalnum()]
+    assert len(names) == len(requirements) and "hatchling" in names
+    assert 'requires = ["hatchling"]' in (REPO / "pyproject.toml").read_text()
 
 
 def test_bundle_builds_our_wheel_fetches_the_pinned_one_and_writes_their_hashes(tmp_path):
