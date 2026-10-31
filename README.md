@@ -26,7 +26,7 @@ dashboard shows what needs attention, live.
 | --- | --- | --- | --- |
 | `scripts/neonwatch-agent` | root, via `sudo` | the broker, publish-only | nothing: it logs to stderr |
 | `neonwatch broker` | you | the agent and the service, on loopback | `~/.local/state/neonwatch/broker/` |
-| `neonwatch service` | you | the broker, the judge, the analyst, your browser | `~/.local/state/neonwatch/` |
+| `neonwatch service` | you | the broker, the judge, the analyst, your browser | `~/.local/state/neonwatch/`, and the Models tab's two files in `~/.config/neonwatch/` |
 | judge, analyst | whatever you run them as | the service | not NeonWatch's concern |
 
 ## What you get
@@ -38,6 +38,7 @@ dashboard shows what needs attention, live.
 | **Services** | Every loaded systemd service, with state and restarts. | Only *Describe…* or *Analyze*, after you confirm |
 | **Logs** | The last 200 journal lines, read when you press *Load* and filterable by priority. | Only *Explain…*, after you confirm |
 | **Board** | Your motherboard from above, each CPU, drive and GPU coloured by temperature against its own limit. | No |
+| **Models** | Which judge and analyst the service calls, where each setting comes from, and whether each has a key. Changes apply without a restart (see *Configure*). | No |
 
 <img alt="The Board view: a generic ATX motherboard drawn from above, one drive cool, the CPU and a GPU warm, a second drive within 5° of its temperature limit and marked as an assumed placement, and parts without sensors hatched." src="docs/images/board.png">
 
@@ -119,14 +120,17 @@ firewall ruleset, journal lines. Treat your account accordingly.
 | `~/.local/state/neonwatch/broker/` (0700) | `neonwatch broker` | the broker's config, a 0600 credential per role, its message store |
 | `~/.local/state/neonwatch/store.sqlite3` (0600) | `neonwatch service` | the dashboard's database |
 | `~/.local/state/neonwatch/agent.token` (0600) | `neonwatch service` | the agent API's token |
+| `~/.local/state/neonwatch/dashboard.url` (0600) | `neonwatch service` | the dashboard URL and its token, while the service runs |
+| `~/.config/neonwatch/models.json`, `secrets.json` (0600) | `neonwatch service`, from the Models tab | the models and the keys set from the dashboard |
 
 The message store and the database each keep 7 days or 10 GiB, whichever comes first
 (`[retention]`).
 
 **What leaves the machine.** At install time, `uv sync` fetches packages, and
 `scripts/fetch-nats-server` downloads nats-server v2.15.0 from GitHub, checked against a SHA-256
-pinned in the script. At run time, by default, **nothing**: the broker, the judge, the dashboard
-and the agent API are all on loopback. Only if you configure it: an analyst on your LAN or the
+pinned in the script. `scripts/install-agent` downloads the nats-py wheel that `uv.lock` pins, from
+PyPI, checked against its hash there. At run time, by default, **nothing**: the broker, the judge,
+the dashboard and the agent API are all on loopback. Only if you configure it: an analyst on your LAN or the
 internet (`reach = "lan"` or `"remote"`), and a LAN dashboard.
 
 </details>
@@ -177,8 +181,8 @@ After the first visit the token lives in a cookie. To look from another machine,
 in `~/.local/state/neonwatch/dashboard.url` (readable by you alone) while the service runs.
 
 Views and issues have addresses, so a link can open one: `#/view/attention`, `scheduled`,
-`services`, `logs` or `board`, and `#/issues/<id>`, which scrolls to that issue's card and marks
-it. An issue that is no longer open says what became of it in the status line. Back and forward
+`services`, `logs`, `board` or `models`, and `#/issues/<id>`, which scrolls to that issue's card
+and marks it. An issue that is no longer open says what became of it in the status line. Back and forward
 move between them.
 
 ### 3. What a healthy first run looks like
@@ -200,7 +204,7 @@ service, then the broker. To remove everything:
 
 ```sh
 rm -rf ~/.local/state/neonwatch        # broker data, credentials, the database, the agent token
-rm -rf ~/.config/neonwatch             # your config, and any TLS key you made
+rm -rf ~/.config/neonwatch             # your config, the models and keys set from the dashboard, any TLS key you made
 claude mcp remove --scope user neonwatch   # only if you registered the MCP server
 rm -rf /path/to/the/clone
 ```
@@ -228,14 +232,17 @@ processes, so stop them first: Ctrl-C in each terminal, the agent first.
 scripts/install-agent
 ```
 
-It builds the two wheels into `dist/agent` as you, then asks sudo to run
+It builds NeonWatch's wheel and downloads the nats-py wheel `uv.lock` pins (checked against its
+hash) into `dist/agent` as you, then asks sudo to run
 `tools/services.py install-agent --operator <you>` on the system Python, isolated. That copies
 the bundle somewhere only root can write and checks every hash. It builds `/opt/neonwatch.new`,
 imports the agent from it, and refuses unless every file is root's and writable by nobody else.
 Then it swaps the copy into `/opt/neonwatch` (the previous one becomes `/opt/neonwatch.old`) and
 writes and enables the unit. The script starts the unit if it isn't running, and shows its status.
 You should see `active (running)` and the agent's first line:
-`observing for <you> (uid <n>): 49 probes, …`.
+`observing for <you> (uid <n>): 49 probes, …`. The unit's interpreter is the system's
+`/usr/bin/python3`, which must be root's and 3.12 or 3.13 (what `pyproject.toml` requires);
+`install-agent` refuses one that is not root's.
 
 **2. The broker and the service, as user units.** As yourself:
 
@@ -344,7 +351,9 @@ target/release/neonwatch-desktop            # or --hidden to start in the tray
 > [!NOTE]
 > Two pieces are not built yet:
 > - **The service still sends its own notifications** with `gdbus`, and those cannot be clicked
->   through. The app's own notifications can, today, from `neonwatch-desktop --notify '<json>'`.
+>   through. It notifies an issue once per severity it reaches (`[notify]`), and a restart does not
+>   repeat it. The app's own notifications can be clicked through, today, from
+>   `neonwatch-desktop --notify '<json>'`.
 >   Handing the service's notifications to the app is the next step.
 > - **Installing the app** (a menu entry, `neonwatch://` links and autostart) comes after that.
 
@@ -422,10 +431,12 @@ api_key_env = ""                            # the NAME of an environment variabl
 ```
 
 For Anthropic, set `provider = "anthropic"`, leave `base_url` empty, and set
-`reach = "remote"` and `api_key_env`. Its API is on the internet, and with `reach = "local"` the
-config is refused. Export the key's variable in the terminal you start the service from. If it is missing, the service
-logs `analyst disabled: …` and carries on without one. The dashboard shows an estimate of what
-will be sent where, and sends nothing until you confirm it.
+`reach = "remote"` and a key. Its API is on the internet, and with `reach = "local"` the
+config is refused. Paste the key into the Models tab, or export the variable `api_key_env` names in
+the terminal you start the service from; the dashboard's key wins. A variable exported in a
+terminal does not reach the `neonwatch-service` user unit, so there use the Models tab. With
+neither, the service logs `analyst disabled: …` and carries on without one. The dashboard shows
+an estimate of what will be sent where, and sends nothing until you confirm it.
 
 ### Draw your own board
 
@@ -520,11 +531,11 @@ Find what you were doing, then the start of the message you saw.
 
 **The judge and the analyst**
 
-- `The judge URL must be loopback` → the judge has to run on this machine.
+- `judge.url must be loopback` → the judge has to run on this machine.
 - `is not loopback and analyst.reach is "local"` → set `reach` to `"lan"` or `"remote"`, knowing
   what that sends where.
-- `analyst disabled` in the service's log → export the key's variable in the terminal you start
-  the service from.
+- `analyst disabled` in the service's log → set the key in the Models tab, or export the key's
+  variable in the terminal you start the service from.
 
 **The dashboard and the probes**
 
