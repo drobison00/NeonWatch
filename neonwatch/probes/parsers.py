@@ -960,12 +960,17 @@ def parse_reboot_required(raw: bytes) -> Data:
 # --- daily tier -------------------------------------------------------------------------------
 
 KEY = re.compile(r"(?:^|\s)((?:ssh|ecdsa|sk)-[\w@.-]+)\s+([A-Za-z0-9+/]+={0,2})(?:\s+(.*))?$")
+#: Keys kept from one authorized_keys file. With `KEPT_BYTES` over all of them, it bounds the
+#: observation as `_table` bounds crontabs: a valid file within the read caps grows
+#: about threefold into key records, so without them one user's file could make the observation
+#: too large to publish, blanking every home's keys. What is not kept is counted (`dropped`).
+MAX_KEYS_PER_FILE = 100
 
 
 def parse_authorized_keys(raw: bytes) -> Data:
-    files, keys = [], []
+    files, keys, spent = [], [], 0
     for path, text in sorted(_files(raw).items()):
-        count = invalid = 0
+        count = invalid = kept = 0
         for line in text.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
@@ -979,13 +984,21 @@ def parse_authorized_keys(raw: bytes) -> Data:
                 invalid += 1
                 continue
             digest = base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
-            keys.append({"path": path, "type": match.group(1), "fingerprint": f"SHA256:{digest}",
-                         "comment": (match.group(3) or "").strip(),
-                         "options": bool(line[: match.start(1)].strip())})
+            key = {"path": path, "type": match.group(1)[:IDENT_CHARS],
+                   "fingerprint": f"SHA256:{digest}",
+                   "comment": _clean((match.group(3) or "").strip(), ARGS_CHARS)[0],
+                   "options": bool(line[: match.start(1)].strip())}
             count += 1
-        files.append({"path": path, "keys": count, "invalid_lines": invalid,
+            cost = _json_bytes(key)
+            if kept < MAX_KEYS_PER_FILE and spent + cost <= KEPT_BYTES:
+                keys.append(key)
+                spent += cost
+                kept += 1
+        files.append({"path": path, "keys": count, "dropped": count - kept,
+                      "invalid_lines": invalid,
                       "sha256": hashlib.sha256(text.encode()).hexdigest()})
-    return {"files": files, "keys": keys, "count": len(keys)}
+    return {"files": files, "keys": keys, "count": len(keys),
+            "dropped": sum(f["dropped"] for f in files)}
 
 
 def _unit_file(item: Any) -> Data:
