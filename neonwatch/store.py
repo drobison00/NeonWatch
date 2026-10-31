@@ -307,7 +307,9 @@ _AGE_PRUNE = (
     "DELETE FROM links WHERE at < ?",
     "DELETE FROM links_latest WHERE at < ?",
     "DELETE FROM analyses WHERE completed_at < ?",
-    "DELETE FROM notified WHERE at < ?",
+    # A live issue keeps its record however old, or a restart would send it again.
+    "DELETE FROM notified WHERE at < ? AND issue_id NOT IN "
+    "(SELECT id FROM issues WHERE state != 'resolved')",
 )
 
 #: Size-pruning tiers, each the oldest rows first: every history table merged in time order,

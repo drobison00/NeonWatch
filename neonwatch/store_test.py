@@ -667,6 +667,17 @@ def test_a_notification_keeps_the_highest_rank_sent_and_the_latest_time(tmp_path
     s.close()
 
 
+def test_a_live_issue_keeps_its_notification_past_retention(tmp_path: Path) -> None:
+    s = Store(tmp_path / "store.sqlite3", config(max_age_s=100))
+    s.apply(issue_event(issue("open", updated_at=10)))
+    s.apply(issue_event(issue("done", state=IssueState.RESOLVED, updated_at=10)))
+    for issue_id in ("open", "done", "gone"):
+        s.note_notified(issue_id, 2, 10.0)
+    s.prune(now=1000)
+    assert s.notified() == {"open": (2, 10.0)}   # resolved or no longer stored: forgotten
+    s.close()
+
+
 def _fill(s: Store, n: int) -> None:
     for t in range(n):
         s.apply(obs_event("wide", {f"field{k}": float(t) for k in range(50)}, at=1000 + t))
