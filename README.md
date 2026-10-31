@@ -1,22 +1,32 @@
 # NeonWatch
 
-**A health monitor for one Linux workstation, in your browser.** A root agent that only reads
-sweeps your hardware, logs, firewall, network, processes, services and containers. Deterministic
-rules raise the alarms. An optional local model ranks what rules cannot judge. A loopback
-dashboard shows what needs attention, live.
+**A read-only health monitor for one Linux workstation.** A root agent sweeps your hardware,
+logs, firewall, network, processes, services and containers, and changes nothing. Deterministic
+rules raise the alarms, and an optional model you run ranks what rules cannot judge. You read the
+result in a loopback web dashboard, in a desktop app with a tray icon and notifications, or from
+an AI agent over MCP.
 
 ![Python 3.12 | 3.13](https://img.shields.io/badge/python-3.12%20%7C%203.13-3776ab)
 ![Linux + systemd](https://img.shields.io/badge/platform-Linux%20%2B%20systemd-555)
 [![Licence: Apache 2.0](https://img.shields.io/badge/licence-Apache%202.0-blue)](LICENSE)
 
+**What it supports:**
+- **Debian- or Ubuntu-based Linux with systemd**, on x86_64 or arm64. The agent runs each tool
+  only from its standard path on those distributions. A tool installed anywhere else is refused,
+  not searched for.
+- **Python 3.12 or 3.13.** `uv` can fetch it for you.
+- **One user per machine.** Another local account could intercept the agent's observations on
+  loopback (see *Known limitations*).
+- **The desktop app** is built from source with Rust, and has no installer yet.
+
+> [!NOTE]
+> **Early.** NeonWatch has run on one machine only: Linux Mint 22 (Cinnamon, X11, kernel 6.8) on
+> x86_64, with an AMD CPU, NVIDIA GPUs and NVMe drives. arm64, other distributions and other
+> desktops are untested. Expect rough edges, and please report them.
+
 <img alt="The Attention view: an incident grouping a crash-looping container with interface churn, a critical SMART warning on an NVMe drive, and a program that ran from /tmp, beside a matrix of thirteen domains where one stale domain is drawn as unknown." src="docs/images/attention.png">
 
 <sub>Screenshots are rendered from synthetic data by `scripts/make-screenshots.py`.</sub>
-
-> [!NOTE]
-> **Early.** NeonWatch has been developed on, and has only run on, one Ubuntu-based workstation
-> (Linux Mint 22, kernel 6.8, an AMD CPU, NVIDIA GPUs, NVMe drives). It assumes a single-user
-> machine. Expect rough edges elsewhere, and please report them.
 
 ## How it fits together
 
