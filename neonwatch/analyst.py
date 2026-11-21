@@ -46,7 +46,9 @@ import asyncio
 import json
 import logging
 import re
+import shlex
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 import uuid
@@ -109,13 +111,80 @@ Every suggested check must be a read-only command that only inspects state, for 
 <device>`. Never suggest a command that restarts, stops, starts, enables, disables, kills, \
 installs, removes, moves, deletes, changes permissions on, or writes to anything."""
 
-#: Words that make a suggested check a state change wherever they appear as a command word.
+#: Words that make a suggested check a state change when used as a command or package subcommand.
 MUTATING_WORDS = frozenset({
     "rm", "rmdir", "rmi", "kill", "pkill", "killall", "restart", "stop", "start", "enable",
     "disable", "mask", "unmask", "install", "uninstall", "remove", "purge", "prune", "chmod",
     "chown", "mv", "dd", "tee", "truncate", "reboot", "shutdown", "poweroff", "halt",
 })
-_WORD_SPLIT = re.compile(r"[\s;|&()`$<]+")
+#: Shell metacharacters that chain, redirect, background, or substitute commands.
+_REFUSED_SHELL_TEXT = (">", ";", "&", "`", "$(", "<(", ">(")
+#: Commands refused as the head of any pipeline segment (state-changing, shells, network, wrappers).
+_MUTATING_COMMANDS = MUTATING_WORDS | frozenset({
+    "unlink", "cp", "shred", "touch", "mkdir", "ln", "chgrp", "chattr", "setfacl", "mount",
+    "umount", "remount", "fdisk", "sfdisk", "parted", "wipefs", "fstrim", "fsck", "swapoff",
+    "swapon", "modprobe", "insmod", "rmmod", "depmod", "suspend", "hibernate", "kexec", "xkill",
+    "xargs", "parallel", "sh", "bash", "zsh", "dash", "fish", "csh", "tcsh", "ksh", "eval",
+    "exec", "source", ".", "sed", "awk", "gawk", "mawk", "perl", "python", "python3", "ruby",
+    "node", "php", "lua", "crontab", "at", "passwd", "chpasswd", "usermod", "useradd", "userdel",
+    "groupadd", "groupmod", "visudo", "sudoedit", "curl", "wget", "nc", "ncat", "netcat", "socat",
+    "telnet", "ftp", "ssh", "scp", "sftp", "rsync", "su", "env", "watch", "timeout", "nice",
+    "nohup", "chroot", "nsenter", "unshare", "script", "expect", "tar", "zip", "unzip", "gzip",
+    "gunzip", "bzip2", "xz", "renice", "ionice", "taskset", "hdparm", "cpupower", "setenforce",
+})
+#: `sudo` flags that consume the following argument (so `sudo -u root /bin/rm` reveals `rm`).
+_SUDO_VALUE_FLAGS = frozenset({
+    "-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U",
+    "--user", "--group", "--chdir", "--host", "--prompt", "--role", "--type", "--other-user",
+})
+#: `sudo` flags that spawn a shell, edit files, or mutate credential timestamps.
+_SUDO_MUTATING_FLAGS = frozenset({
+    "-i", "-s", "-e", "-k", "-K", "-v", "--login", "--shell", "--edit", "--reset-timestamp",
+    "--remove-timestamp", "--validate",
+})
+_PACKAGE_MANAGERS = frozenset({
+    "apt", "apt-get", "dnf", "yum", "pacman", "zypper", "apk", "snap", "flatpak", "pip", "pip3",
+    "uv", "npm", "cargo",
+})
+_PACKAGE_MUTATING = MUTATING_WORDS | frozenset({
+    "reinstall", "upgrade", "update", "autoremove", "add", "del", "delete", "clean", "sync",
+    "run", "build", "publish", "init", "refresh",
+})
+#: Command -> arguments/subcommands that change state on an otherwise read-only tool.
+_REFUSED_COMMAND_ARGS: dict[str, frozenset[str]] = {
+    "find": frozenset({"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0",
+                       "-fprintf", "-fls"}),
+    "smartctl": frozenset({"-s", "--smart", "-t", "--test", "-X", "--abort", "-o",
+                           "--offlineauto", "-S", "--saveauto", "--set"}),
+    "nvidia-smi": frozenset({"-pm", "--persistence-mode", "-e", "--ecc-config", "-c",
+                             "--compute-mode", "-r", "--gpu-reset", "--gom", "-lgc",
+                             "--lock-gpu-clocks", "-rgc", "--reset-gpu-clocks", "-ac",
+                             "--applications-clocks", "-rac", "-pl", "--power-limit", "-am",
+                             "--accounting-mode", "-caa", "--clear-accounted-apps"}),
+    "dmesg": frozenset({"-c", "-C", "--clear", "--read-clear", "-n", "--console-level", "-D",
+                        "--console-off", "-E", "--console-on"}),
+    "journalctl": frozenset({"--vacuum-size", "--vacuum-time", "--vacuum-files", "--rotate",
+                             "--flush", "--sync", "--relinquish-var", "--smart-relinquish-var",
+                             "--setup-keys", "--update-catalog"}),
+    "ss": frozenset({"-K", "--kill"}),
+    "sysctl": frozenset({"-w", "--write", "-p", "--load", "--system"}),
+    "docker": frozenset({"up", "down", "rm", "rmi", "stop", "kill", "restart", "start", "pause",
+                         "unpause", "prune", "run", "exec", "create", "cp", "commit", "update",
+                         "rename", "tag", "push", "pull", "build", "load", "import", "attach"}),
+    "podman": frozenset({"up", "down", "rm", "rmi", "stop", "kill", "restart", "start", "pause",
+                         "unpause", "prune", "run", "exec", "create", "cp", "commit", "update",
+                         "rename", "tag", "push", "pull", "build", "load", "import", "attach"}),
+    "ip": frozenset({"add", "del", "delete", "set", "flush", "change", "replace", "append", "up",
+                     "down"}),
+    "nft": frozenset({"add", "delete", "flush", "insert", "replace", "create", "destroy",
+                      "reset", "-f", "--file"}),
+    "nmcli": frozenset({"up", "down", "modify", "add", "delete", "connect", "disconnect", "on",
+                        "off", "reload", "set"}),
+    "nvme": frozenset({"format", "sanitize", "reset", "subsystem-reset", "set-feature", "write",
+                       "write-zeroes", "write-uncor", "fw-download", "fw-commit", "create-ns",
+                       "delete-ns", "attach-ns", "detach-ns", "admin-passthru", "io-passthru",
+                       "security-send", "dsm", "flush"}),
+}
 _FENCE = re.compile(r"^```(?:json)?\s*\n(.*)\n```$", re.DOTALL)
 #: End-of-turn markers some servers leave in the content (Qwen's `<|im_end|>` among them).
 _END_MARKERS = re.compile(r"<\|(?:im_end|eot_id|endoftext|end)\|>|</s>")
@@ -801,19 +870,88 @@ def interpret(raw: str) -> tuple[str, tuple[str, ...]]:
     return text, tuple(kept)
 
 
-def is_mutating(check: str) -> bool:
-    """Whether a suggested command could change state. A denylist, so it fails toward dropping."""
-    if ">" in check:
-        return True
-    words = [word.strip("'\"\\").rsplit("/", 1)[-1].lower() for word in _WORD_SPLIT.split(check)]
-    words = [word for word in words if word]
-    for at, word in enumerate(words):
-        if word in MUTATING_WORDS or word.startswith("mkfs"):
+def has_unsafe_control(text: str) -> bool:
+    """Whether text contains ASCII/C1 control, newline, or Unicode format/bidi characters."""
+    for ch in text:
+        code = ord(ch)
+        if code < 0x20 or 0x7F <= code <= 0x9F:
             return True
-        if word == "systemctl":
-            sub = next((w for w in words[at + 1:] if not w.startswith("-")), "")
+        if unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp"):
+            return True
+    return False
+
+
+def _unwrap_sudo(tokens: list[str]) -> list[str] | None:
+    """Strip leading `sudo` and safe flags; return `None` when a mutating flag or empty command."""
+    index = 0
+    while index < len(tokens) and tokens[index].rsplit("/", 1)[-1].lower() == "sudo":
+        index += 1
+        while index < len(tokens) and tokens[index].startswith("-"):
+            flag = tokens[index]
+            if flag == "--":
+                index += 1
+                break
+            head = flag.split("=", 1)[0]
+            if head in _SUDO_MUTATING_FLAGS:
+                return None
+            index += 1
+            if head in _SUDO_VALUE_FLAGS and "=" not in flag:
+                if index >= len(tokens):
+                    return None
+                index += 1
+    return tokens[index:] or None
+
+
+def is_mutating(check: str) -> bool:
+    """Whether a suggested command could change state or hide terminal control characters.
+
+    An advisory filter (not a shell proof) that fails toward dropping: rejects control/bidi
+    characters, shell chaining/redirection, shells/network/state-changing commands, and mutating
+    subcommands/flags while preserving normal read-only inspection commands.
+    """
+    if has_unsafe_control(check):
+        return True
+    if any(token in check for token in _REFUSED_SHELL_TEXT):
+        return True
+    for segment in check.split("|"):
+        segment = segment.strip()
+        if not segment:
+            return True
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            return True
+        words = _unwrap_sudo(tokens)
+        if not words:
+            return True
+        command = words[0].rsplit("/", 1)[-1].lower()
+        args = words[1:]
+        if not command or command in _MUTATING_COMMANDS or command.startswith("mkfs"):
+            return True
+        if command == "systemctl":
+            if any(arg == "--now" for arg in args):
+                return True
+            sub = next((arg.lower() for arg in args if not arg.startswith("-")), "")
             if sub not in ("status", "show") and not sub.startswith(("list-", "is-")):
                 return True
+            continue
+        if command == "service":
+            positional = [arg.lower() for arg in args if not arg.startswith("-")]
+            if len(positional) < 2 or positional[1] != "status":
+                return True
+            continue
+        if command == "sysctl" and any("=" in arg and not arg.startswith("-") for arg in args):
+            return True
+        if command in _PACKAGE_MANAGERS:
+            if any(arg.lower() in _PACKAGE_MUTATING for arg in args if not arg.startswith("-")):
+                return True
+            continue
+        refused = _REFUSED_COMMAND_ARGS.get(command)
+        if refused:
+            for arg in args:
+                head = arg.split("=", 1)[0]
+                if arg in refused or head in refused or arg.lower() in refused:
+                    return True
     return False
 
 

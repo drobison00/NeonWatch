@@ -323,7 +323,33 @@
 
   // --- copy -----------------------------------------------------------------------------------
 
+  const UNSAFE_CONTROL = /[\u0000-\u001F\u007F-\u009F\u2028\u2029\p{Cf}]/u;
+  const UNSAFE_CONTROL_GLOBAL = /[\u0000-\u001F\u007F-\u009F\u2028\u2029\p{Cf}]/gu;
+
+  function hasUnsafeControl(text) {
+    return UNSAFE_CONTROL.test(String(text));
+  }
+
+  function escapeUnsafeControl(text) {
+    return String(text).replace(UNSAFE_CONTROL_GLOBAL, (ch) => {
+      if (ch === "\n") return "\\n";
+      if (ch === "\r") return "\\r";
+      if (ch === "\t") return "\\t";
+      const hex = ch.codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
+      return `\\u${hex}`;
+    });
+  }
+
   function copyButton(text, codeNode) {
+    if (hasUnsafeControl(text)) {
+      return el("button", {
+        type: "button",
+        class: "copy",
+        text: "Copy disabled",
+        disabled: true,
+        title: "Contains control, newline, or invisible formatting characters; copy is disabled.",
+      });
+    }
     const button = el("button", { type: "button", class: "copy", text: "Copy", title: "Copy to the clipboard. Nothing is run." });
     button.addEventListener("click", async () => {
       try {
@@ -344,8 +370,17 @@
     return button;
   }
 
+  function checkCode(text) {
+    const raw = String(text);
+    const unsafe = hasUnsafeControl(raw);
+    return el("code", {
+      text: unsafe ? escapeUnsafeControl(raw) : raw,
+      title: unsafe ? "Control or invisible formatting characters are shown escaped." : undefined,
+    });
+  }
+
   function checkLine(text, label) {
-    const code = el("code", { text });
+    const code = checkCode(text);
     return el("div", { class: "check" }, label ? el("span", { class: "label muted", text: label }) : null, code, copyButton(text, code));
   }
 
@@ -671,7 +706,7 @@
       put(p.what, whatHappened(issue.evidence), seenLine(issue));
       p.what.hidden = !p.what.childNodes.length;
       if (issue.next_step) {
-        const code = el("code", { text: issue.next_step });
+        const code = checkCode(issue.next_step);
         put(p.next, el("span", { class: "label", text: gone(issue) ? "Next check (it may be gone)" : "Next check" }), code, copyButton(issue.next_step, code));
         p.next.hidden = false;
       } else {

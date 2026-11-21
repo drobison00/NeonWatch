@@ -275,7 +275,7 @@ button.fold:hover { color: var(--text); }
 .card-next .label { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .card-next code, .check code {
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px;
-  padding: 1px 5px; overflow-wrap: anywhere; user-select: all;
+  padding: 1px 5px; overflow-wrap: anywhere; user-select: all; white-space: pre-wrap;
 }
 .card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
 .card-actions .group { display: inline-flex; align-items: center; gap: 2px; }

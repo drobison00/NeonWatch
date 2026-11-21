@@ -476,17 +476,28 @@ def test_mutating_and_malformed_checks_are_dropped_and_counted():
     "systemctl daemon-reload", "systemctl", "systemctl --user kill x", "ls; rm f",
     "echo $(reboot)", "`shutdown`", "service nginx restart", "docker system prune",
     "SYSTEMCTL RESTART docker", "'rm' f", "truncate -s 0 f",
+    "sudo -u root /bin/rm /review-only", "sudo -u root /usr/bin/touch /tmp/x",
+    "sudo -i", "sudo -s", "sysctl -w net.ipv4.ip_forward=1", "sysctl kernel.hostname=test",
+    "s\\h -c id", "bash -c 'id'", "python3 -c 'import os'", "curl https://example.com",
+    "wget -qO- https://example.com", "find /tmp -delete", "find /tmp -exec rm {} +",
+    "docker run --rm alpine", "docker exec web sh", "nft flush ruleset",
+    "ip link set eth0 down", "dmesg -C", "ss -K", "ls & /usr/bin/touch /tmp/x",
+    "df -h\n/usr/bin/touch /tmp/x", "df -h\r/usr/bin/touch /tmp/x",
+    "df -h \u202e# safe", "df -h\x00", "ls && /usr/bin/touch /tmp/x",
+    "ls || /usr/bin/touch /tmp/x", "cat <(id)",
 ])
 def test_is_mutating_refuses_state_changing_checks(check):
     assert is_mutating(check), check
 
 
 @pytest.mark.parametrize("check", [
-    "systemctl status docker", "systemctl show docker -p ActiveState",
+    "systemctl status docker", "systemctl status stop.service",
+    "systemctl show docker -p ActiveState",
     "systemctl list-units --failed", "systemctl --user is-active x", "systemctl is-enabled x",
     "journalctl -u docker --since -1h", "docker ps -a", "docker logs --tail 100 web",
-    "sudo smartctl -a /dev/nvme0", "df -h", "ip -s link show", "ss -ltnp",
-    "dmesg | grep -i error", "cat /proc/loadavg < /dev/null",
+    "sudo smartctl -a /dev/nvme0", "df -h", "findmnt /data", "ip -s link show", "ss -ltnp",
+    "dmesg | grep -i error", "grep -i 'reset' /var/log/syslog",
+    "cat /proc/loadavg < /dev/null", "sysctl net.ipv4.ip_forward",
 ])
 def test_is_mutating_allows_read_only_checks(check):
     assert not is_mutating(check), check
